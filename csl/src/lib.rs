@@ -44,6 +44,9 @@ pub fn read_featurize_write(
     print_new_edges: bool,
     split_rate: usize,
     threshold_k: usize,
+    max_k: usize,
+    diagnostic_colors: Vec<usize>,
+    nofilter: bool,
 ) -> Result<(), Box<dyn Error>> {
     let first_train_path = train[0].clone();
 
@@ -160,8 +163,13 @@ pub fn read_featurize_write(
 
             let train_n = nlines;
 
-            if threshold_k == 0 {
-                let ks = (1..=64).collect::<Vec<_>>();
+            let (rate, std) = color_collision_count(&valid, &featurizer, &color);
+            println!("color collision count {}", rate);
+            println!("color collision std {}", std);
+
+            if max_k > 0 {
+                // substitute 3 with 64 for graphs in Appendix
+                let ks = (1..=max_k).collect::<Vec<_>>();
                 let mut gt_ests = Vec::new();
                 let mut actual_new_edges = Vec::new();
                 let mut max_degrees = Vec::new();
@@ -261,36 +269,34 @@ pub fn read_featurize_write(
             }
 
             if threshold_k > 0 {
-                let collisions: Vec<_> = (1..=10)
-                    .into_par_iter()
-                    .map(|i| 1000 * i)
-                    .map(|c| {
+                let collisions: Vec<_> = diagnostic_colors
+                    .par_iter()
+                    .map(|&c| {
                         let mut graph = graph.filter(threshold_k);
                         graph.internal_sort();
 
-                        let lf = graph.largest_first();
-                        let cutoff = lf
-                            .iter()
-                            .map(|(_, deg)| *deg as usize)
-                            .enumerate()
-                            .position(|(i, deg)| deg * 2 < i)
-                            .unwrap_or(lf.len());
+                        let mut mask = vec![true; graph.nvertices()];
 
-                        let mut mask = vec![true; lf.len()];
-                        for (v, _) in &lf[0..cutoff] {
-                            mask[*v as usize] = false;
+                        if !nofilter {
+                            let lf = graph.largest_first();
+                            let cutoff = lf
+                                .iter()
+                                .map(|(_, deg)| *deg as usize)
+                                .enumerate()
+                                .position(|(i, deg)| deg * 2 < i)
+                                .unwrap_or(lf.len());
+                            for (v, _) in &lf[0..cutoff] {
+                                mask[*v as usize] = false;
+                            }
                         }
 
                         let (ncolors, colors) = glauber_color(&graph, c as u32, &mask);
-                        let rate = color_collision_count(&valid, &featurizer, &colors);
-                        (ncolors, rate)
+                        let (rate, std) = color_collision_count(&valid, &featurizer, &colors);
+                        (ncolors, rate, std)
                     })
                     .collect();
                 println!("glauber collisions {:?}", collisions);
             }
-
-            let rate = color_collision_count(&valid, &featurizer, &color);
-            println!("color collision count {}", rate);
 
             println!(
                 "new color co-occurrence assessment {:.0?}",
@@ -572,10 +578,14 @@ fn validate_coloring(ncolors: usize, colors: &[u32], train: &SvmScanner, featuri
     assert!(violation.is_none(), "{:?}", violation);
 }
 
-fn color_collision_count(valid: &SvmScanner, featurizer: &Featurizer, colors: &[u32]) -> f64 {
-    let (color_collision_count, total_examples) = valid.fold_reduce(
-        || (0usize, 0usize),
-        |(color_collision_count, total_examples), word_iter| {
+fn color_collision_count(
+    valid: &SvmScanner,
+    featurizer: &Featurizer,
+    colors: &[u32],
+) -> (f64, f64) {
+    let (color_collision_squared, color_collision_count, total_examples) = valid.fold_reduce(
+        || (0usize, 0usize, 0usize),
+        |(color_collision_squared, color_collision_count, total_examples), word_iter| {
             // skip the target word
 
             let mut indices = Vec::with_capacity(1024);
@@ -601,11 +611,19 @@ fn color_collision_count(valid: &SvmScanner, featurizer: &Featurizer, colors: &[
 
             let collision_count = nnz - unique_colors;
 
-            (color_collision_count + collision_count, total_examples + 1)
+            (
+                color_collision_squared + collision_count.pow(2),
+                color_collision_count + collision_count,
+                total_examples + 1,
+            )
         },
-        |(a1, a2), (b1, b2)| (a1 + b1, a2 + b2),
+        |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
     );
-    color_collision_count as f64 / total_examples as f64
+    // not stable, blah blah blah
+    let avg = color_collision_count as f64 / total_examples as f64;
+    let std = color_collision_squared as f64 / total_examples as f64;
+    let std = (std - avg.powi(2)).sqrt();
+    (avg, std)
 }
 
 /// Sample a coloring uniformly (and in parallel), with respect to the given graph.
@@ -629,10 +647,10 @@ fn glauber_color(graph: &AdjacencyList, unif_colors: u32, mask: &[bool]) -> (u32
     // by expectation version of birthday problem, don't want more than this
     // much parallelism
     let max_parallel = ((subgraph_sz as f64).sqrt() / avg_degree as f64) as usize;
-    let nthreads = (rayon::current_num_threads() as usize).min(max_parallel.max(1));
+    let nthreads = (rayon::current_num_threads() as usize).min(max_parallel.max(16));
 
     println!(
-        "chose parallelism {} (max {}) for {}-coloring",
+        "chose parallelism {} (recommendation {}) for {}-coloring",
         nthreads, max_parallel, unif_colors
     );
 

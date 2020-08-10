@@ -137,10 +137,29 @@ struct Opt {
 
     /// If --print-new-edges is specified, then uses this value of k to show
     /// diagnostics about color collisions for the filtered, thresholded graph
-    /// given by threshold k. If this is nonzero, the other diagnostics aren't printed,
-    /// if this is zero, this diagnostic isn't printed.
+    /// given by threshold k, for varying colors as specified by
+    /// the argument diagnostic_colors
+    ///
+    /// If this is set to 0 (the default), then these diagnostics are not printed.
     #[structopt(long, default_value = "0")]
     k: usize,
+
+    /// If --print-new-edges is specified, then uses this value of max_k
+    /// to show graphical diagnostics about the k-filtered co-occurrence
+    /// graphs, with k varying between [1, max_k].
+    #[structopt(long, default_value = "64")]
+    max_k: usize,
+
+    /// See `k` argument. If left empty then a single reasonable number
+    /// of colors will be chosen for you for Glauber coloring.
+    #[structopt(long)]
+    diagnostic_colors: Option<Vec<usize>>,
+
+    /// See `k` argument. If --nofilter is on, then for the diagnostics
+    /// printed due to the `k` flag (collisions from Glauber coloring),
+    /// no pre-emptive largest-first filtering is performed.
+    #[structopt(long)]
+    nofilter: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -189,6 +208,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         opt.print_new_edges,
         opt.split_rate,
         opt.k,
+        opt.max_k,
+        opt.diagnostic_colors.unwrap_or(vec![]),
+        opt.nofilter,
     )?;
     Ok(())
 }

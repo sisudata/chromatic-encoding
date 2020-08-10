@@ -90,7 +90,7 @@ impl FeaturizerConstructor {
                 if !is_dense.get(i).copied().unwrap_or(false) {
                     self.make_sure_room(i);
                     *self.categorical_counts[i]
-                        .entry(Identity64::from(xx::hash64(word)))
+                        .entry(Identity64::from(hash(word)))
                         .or_insert(0) += 1;
                 }
                 count += 1;
@@ -101,10 +101,7 @@ impl FeaturizerConstructor {
             line.filter(|word| not_space(*word))
                 .map(strip_value)
                 .map(|word| {
-                    *self
-                        .counts
-                        .entry(Identity64::from(xx::hash64(word)))
-                        .or_insert(0) += 1;
+                    *self.counts.entry(Identity64::from(hash(word))).or_insert(0) += 1;
                 })
                 .count()
         }
@@ -295,14 +292,14 @@ impl Featurizer {
             if is_dense.get(i).copied().unwrap_or(false) {
                 return None;
             }
-            let hash = Identity64::from(xx::hash64(word));
+            let hash = Identity64::from(hash(word));
             return self.feature_idxs[i].get(&hash).copied();
         }
         if !not_space(word) {
             return None;
         }
         let word = strip_value(word);
-        let hash = Identity64::from(xx::hash64(word));
+        let hash = Identity64::from(hash(word));
         self.sparse.get(&hash).copied()
     }
 
@@ -340,7 +337,7 @@ impl Featurizer {
         line.filter(|word| not_space(*word))
             .map(pair_value)
             .flat_map(|(feature, value)| {
-                let hash = Identity64::from(xx::hash64(feature));
+                let hash = Identity64::from(hash(feature));
                 let idx = self.dense.get(&hash)?;
                 let value_str = std::str::from_utf8(value).expect("utf-8 value (svm)");
                 let value: f64 = str::parse(value_str).expect("f64 parse (svm)");
@@ -364,4 +361,12 @@ pub fn pair_value(word: &[u8]) -> (&[u8], &[u8]) {
 
 pub fn not_space(word: &[u8]) -> bool {
     !word.iter().copied().all(|c| c.is_ascii_whitespace())
+}
+
+fn hash(word: &[u8]) -> u64 {
+    // like VW, don't hash numbers
+    std::str::from_utf8(word)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| xx::hash64(word))
 }
