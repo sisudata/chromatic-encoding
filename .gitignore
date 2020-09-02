@@ -1,6 +1,8 @@
 # data dirs
 graph-data/*
 !graph-data
+turing-gen-data/*
+!turing-gen-data
 vw-data/*
 !vw-data
 svms-data/*
