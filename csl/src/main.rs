@@ -129,6 +129,17 @@ struct Opt {
     #[structopt(long)]
     dump_graph: Option<PathBuf>,
 
+    /// If specified, use a forced edge filtration count to generate the graph
+    /// used in the chromatic representation.
+    ///
+    /// Automatically triggers Glauber coloring instead.
+    #[structopt(long)]
+    force_filter: Option<usize>,
+
+    /// Number of samples to use for glauber coloring.
+    #[structopt(long)]
+    glauber_samples: Option<usize>,
+
     /// If --print-new-edges is specified, then prints diagnostic information
     /// about the frequency of new edges (and new edges between vertices of
     /// the same color)
@@ -211,6 +222,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         opt.max_k,
         opt.diagnostic_colors.unwrap_or(vec![]),
         opt.nofilter,
+        opt.force_filter,
+        opt.glauber_samples,
     )?;
     Ok(())
 }

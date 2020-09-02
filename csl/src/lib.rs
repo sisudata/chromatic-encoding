@@ -47,6 +47,8 @@ pub fn read_featurize_write(
     max_k: usize,
     diagnostic_colors: Vec<usize>,
     nofilter: bool,
+    force_filter: Option<usize>,
+    glauber_samples: Option<usize>,
 ) -> Result<(), Box<dyn Error>> {
     let first_train_path = train[0].clone();
 
@@ -88,7 +90,7 @@ pub fn read_featurize_write(
         //
         // For logging purposes, also maximum number of active features among all lines.
         let start = Instant::now();
-        let (edges_vec, edge_freqs, edge_stats) = edges::collect_edges(&train, &featurizer);
+        let (mut edges_vec, mut edge_freqs, edge_stats) = edges::collect_edges(&train, &featurizer);
         println!(
             "edge collection {:.0?}",
             Instant::now().duration_since(start)
@@ -117,6 +119,20 @@ pub fn read_featurize_write(
             println!("dump graph {:.0?}", Instant::now().duration_since(start));
         }
 
+        if let Some(filter) = force_filter {
+            let mut index = 0;
+            edges_vec.retain(|_| {
+                index += 1;
+                edge_freqs[index - 1] >= filter
+            });
+            edge_freqs.retain(|&f| f >= filter);
+            println!(
+                "filter to {} edges occuring at least {} times",
+                edges_vec.len(),
+                filter
+            );
+        }
+
         let start = Instant::now();
         let mut graph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
         println!(
@@ -141,9 +157,28 @@ pub fn read_featurize_write(
         }
 
         let start = Instant::now();
-        let (ncolors, color) = greedy_color(&graph);
+        let (ncolors, color) = if let Some(nsamples) = glauber_samples {
+            graph.internal_sort();
+
+            let mut mask = vec![true; graph.nvertices()];
+
+            let lf = graph.largest_first();
+            let cutoff = lf
+                .iter()
+                .map(|(_, deg)| *deg as usize)
+                .enumerate()
+                .position(|(i, deg)| deg * 2 < i)
+                .unwrap_or(lf.len());
+            for (v, _) in &lf[0..cutoff] {
+                mask[*v as usize] = false;
+            }
+
+            glauber_color(&graph, budget as u32, &mask, Some(nsamples))
+        } else {
+            greedy_color(&graph)
+        };
         println!(
-            "greedy graph coloring {:.0?}",
+            "greedy/glauber graph coloring {:.0?}",
             Instant::now().duration_since(start)
         );
         println!("greedy num colors {}", ncolors);
@@ -290,7 +325,7 @@ pub fn read_featurize_write(
                             }
                         }
 
-                        let (ncolors, colors) = glauber_color(&graph, c as u32, &mask);
+                        let (ncolors, colors) = glauber_color(&graph, c as u32, &mask, None);
                         let (rate, std) = color_collision_count(&valid, &featurizer, &colors);
                         (ncolors, rate, std)
                     })
@@ -631,7 +666,12 @@ fn color_collision_count(
 /// Accepts a mask to operate on the induced subgraph of the given graph. Vertices
 /// that are masked out are given unique colors. Uses `unif_colors` for the coloring,
 /// which should be at least the number of colors used for a greedy coloring.
-fn glauber_color(graph: &AdjacencyList, unif_colors: u32, mask: &[bool]) -> (u32, Vec<u32>) {
+fn glauber_color(
+    graph: &AdjacencyList,
+    unif_colors: u32,
+    mask: &[bool],
+    nsamples: Option<usize>,
+) -> (u32, Vec<u32>) {
     let (ncolors, mut colors) = greedy_color(&graph);
     assert!(ncolors < unif_colors);
 
@@ -656,7 +696,7 @@ fn glauber_color(graph: &AdjacencyList, unif_colors: u32, mask: &[bool]) -> (u32
 
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    let samples = max_degree * subgraph_sz;
+    let samples = nsamples.unwrap_or(max_degree * subgraph_sz);
 
     let colors = colors
         .into_iter()
