@@ -69,7 +69,6 @@ impl EncodingDictionary {
         colors: Vec<u32>,
         split_rate: usize,
     ) -> Self {
-        let budget = budget - featurizer.ndense();
         let variant = match compression {
             Compression::TargetEncode => EncodingDictionaryVariant::TargetEncode(
                 target_encode::EncodingDictionary::new(budget, train, featurizer, ncolors, colors),

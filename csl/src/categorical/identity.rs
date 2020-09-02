@@ -20,7 +20,7 @@ pub(crate) struct Encoder {
 
 impl EncodingDictionary {
     pub(crate) fn new(budget: usize, ncolors: usize, colors: Vec<u32>) -> Self {
-        assert!(budget > ncolors, "budget {} <= ncolors {}", budget, ncolors);
+        assert!(budget >= ncolors, "budget {} <= ncolors {}", budget, ncolors);
 
         let start = Instant::now();
         let mut recode = colors.clone();

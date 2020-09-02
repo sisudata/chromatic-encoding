@@ -18,7 +18,7 @@ use adjacency::AdjacencyList;
 use categorical::{Encoder, EncodingDictionary};
 use feature::{Featurizer, FeaturizerConstructor};
 use itertools::Itertools;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use rayon;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::*;
@@ -46,7 +46,7 @@ pub fn read_featurize_write(
     threshold_k: usize,
     max_k: usize,
     diagnostic_colors: Vec<usize>,
-    nofilter: bool,
+    _nofilter: bool,
     force_filter: Option<usize>,
     glauber_samples: Option<usize>,
 ) -> Result<(), Box<dyn Error>> {
@@ -77,6 +77,8 @@ pub fn read_featurize_write(
     println!("num words total {}", nwords);
     println!("dense features {}", featurizer.ndense());
     println!("sparse features {}", featurizer.nsparse());
+    let budget = budget - featurizer.ndense();
+    println!("new working budget {}", budget);
     println!(
         "input data type {}",
         if featurizer.istsv() { "tsv" } else { "svm" }
@@ -159,21 +161,8 @@ pub fn read_featurize_write(
         let start = Instant::now();
         let (ncolors, color) = if let Some(nsamples) = glauber_samples {
             graph.internal_sort();
-
-            let mut mask = vec![true; graph.nvertices()];
-
-            let lf = graph.largest_first();
-            let cutoff = lf
-                .iter()
-                .map(|(_, deg)| *deg as usize)
-                .enumerate()
-                .position(|(i, deg)| deg * 2 < i)
-                .unwrap_or(lf.len());
-            for (v, _) in &lf[0..cutoff] {
-                mask[*v as usize] = false;
-            }
-
-            glauber_color(&graph, budget as u32, &mask, Some(nsamples))
+            let budget = budget as u32;
+            (budget, glauber_color(&graph, budget, Some(nsamples)))
         } else {
             greedy_color(&graph)
         };
@@ -310,24 +299,9 @@ pub fn read_featurize_write(
                         let mut graph = graph.filter(threshold_k);
                         graph.internal_sort();
 
-                        let mut mask = vec![true; graph.nvertices()];
-
-                        if !nofilter {
-                            let lf = graph.largest_first();
-                            let cutoff = lf
-                                .iter()
-                                .map(|(_, deg)| *deg as usize)
-                                .enumerate()
-                                .position(|(i, deg)| deg * 2 < i)
-                                .unwrap_or(lf.len());
-                            for (v, _) in &lf[0..cutoff] {
-                                mask[*v as usize] = false;
-                            }
-                        }
-
-                        let (ncolors, colors) = glauber_color(&graph, c as u32, &mask, None);
+                        let colors = glauber_color(&graph, c as u32, None);
                         let (rate, std) = color_collision_count(&valid, &featurizer, &colors);
-                        (ncolors, rate, std)
+                        (c, rate, std)
                     })
                     .collect();
                 println!("glauber collisions {:?}", collisions);
@@ -435,15 +409,27 @@ struct FeatureStats {
 /// Colors are numbered starting at 0, with smaller colors being
 /// the ones that contain the largest number of associated vertices.
 fn greedy_color(graph: &AdjacencyList) -> (u32, Vec<u32>) {
+    let mut mask = vec![true; graph.nvertices()];
+    greedy_color_masked(graph, &mut mask)
+}
+
+/// As above but only color vertices where mask is hot. Returned
+/// array is still over all vertices but with the value of uncolored vertices
+/// set to std::u32::MAX.
+fn greedy_color_masked(graph: &AdjacencyList, mask: &[bool]) -> (u32, Vec<u32>) {
     let nvertices = graph.nvertices();
+    assert!(mask.len() == graph.nvertices());
     let mut vertices: Vec<_> = (0..nvertices).map(|v| v as u32).collect();
     vertices.sort_unstable_by_key(|&v| graph.degree(v));
 
-    let mut colors: Vec<u32> = vec![std::u32::MAX; nvertices];
     let mut has_been_colored = vec![false; nvertices];
+    let mut colors: Vec<u32> = vec![std::u32::MAX; nvertices];
     let mut adjacent_colors: Vec<bool> = Vec::new();
 
     for vertex in vertices.into_iter().rev() {
+        if !mask[vertex as usize] {
+            continue;
+        }
         // loop invariant is that none of adjacent_colors elements are true
 
         // what color are our neighbors?
@@ -500,8 +486,10 @@ fn greedy_color(graph: &AdjacencyList) -> (u32, Vec<u32>) {
 
     let ncolors = adjacent_colors.len();
     let mut color_counts = vec![0u32; ncolors];
-    colors.iter().copied().for_each(|c| {
-        color_counts[c as usize] += 1;
+    colors.iter().copied().zip(mask.iter().copied()).for_each(|(c, masked)| {
+        if masked {
+            color_counts[c as usize] += 1;
+        }
     });
 
     let code: Vec<_> = (0..ncolors)
@@ -512,7 +500,10 @@ fn greedy_color(graph: &AdjacencyList) -> (u32, Vec<u32>) {
         recode[code[i]] = i as u32;
     }
 
-    for color in colors.iter_mut() {
+    for (i, color) in colors.iter_mut().enumerate() {
+    	if !mask[i] {
+	   continue;
+	}
         *color = recode[*color as usize];
     }
 
@@ -661,19 +652,55 @@ fn color_collision_count(
     (avg, std)
 }
 
-/// Sample a coloring uniformly (and in parallel), with respect to the given graph.
+/// Sample a coloring uniformly (and in parallel), with respect to the given graph,
+/// which should be internally sorted.
+///
+/// Performs a largest-first filter; those vertices get their own colors.
+///
+/// If there are any colors remaining they're randomly assigned via glauber coloring.
 ///
 /// Accepts a mask to operate on the induced subgraph of the given graph. Vertices
-/// that are masked out are given unique colors. Uses `unif_colors` for the coloring,
+/// that are masked out are given std::u32::MAX  colors. Uses `unif_colors` for the coloring,
 /// which should be at least the number of colors used for a greedy coloring.
-fn glauber_color(
-    graph: &AdjacencyList,
-    unif_colors: u32,
-    mask: &[bool],
-    nsamples: Option<usize>,
-) -> (u32, Vec<u32>) {
-    let (ncolors, mut colors) = greedy_color(&graph);
-    assert!(ncolors < unif_colors);
+fn glauber_color(graph: &AdjacencyList, budget: u32, nsamples: Option<usize>) -> Vec<u32> {
+    // TODO: possibly --nofilter here
+    let lf = graph.largest_first();
+    let cutoff = lf
+        .iter()
+        .map(|(_, deg)| *deg as usize)
+        .enumerate()
+        .position(|(i, deg)| deg * 2 < i)
+        .unwrap_or(lf.len());
+    println!("cutoff after vertex {}", cutoff);
+
+    let nv = graph.nvertices() as u32;
+    let mut colors = random_improper_coloring(nv, nv.min(budget));
+    let mut budget = budget;
+    for (v, _) in &lf[0..cutoff] {
+        if budget == 0 {
+            break;
+        }
+        budget -= 1;
+        colors[*v as usize] = budget;
+    }
+
+    if budget == 0 {
+        return colors;
+    }
+
+    let ref mut mask = vec![true; graph.nvertices()];
+    for (v, _) in &lf[0..cutoff] {
+        mask[*v as usize] = false;
+    }
+    let (greedy_ncolors, greedy_colors) = greedy_color_masked(&graph, mask);
+    if greedy_ncolors > budget {
+        return colors;
+    }
+    for v in 0..graph.nvertices() {
+        if mask[v] {
+            colors[v] = greedy_colors[v];
+        }
+    }
 
     // https://www.math.cmu.edu/~af1p/Texfiles/colorbdd.pdf
     // https://www.math.cmu.edu/~af1p/Teaching/MCC17/Papers/colorJ.pdf
@@ -690,8 +717,8 @@ fn glauber_color(
     let nthreads = (rayon::current_num_threads() as usize).min(max_parallel.max(16));
 
     println!(
-        "chose parallelism {} (recommendation {}) for {}-coloring",
-        nthreads, max_parallel, unif_colors
+        "chose parallelism {} (recommendation {}) for {}-coloring (greedy {})",
+        nthreads, max_parallel, budget, greedy_ncolors
     );
 
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -708,14 +735,14 @@ fn glauber_color(
         .map(|i| {
             let samples = (samples / nthreads).max(1);
             let mut rng = StdRng::seed_from_u64((1234 + i) as u64); // no idea how to do this better in rust
-            let mut adjacent_color: Vec<bool> = vec![false; unif_colors as usize];
+            let mut adjacent_color: Vec<bool> = vec![false; budget as usize];
             let mut neighbor_colors: Vec<u32> = Vec::with_capacity(max_degree as usize);
             let mut conflicts = 0;
 
             for _ in 0..samples {
                 // loop invariant is that none of adjacent_color elements are true
 
-                let reservation = (unif_colors + 1) as u32;
+                let reservation = (budget + 1) as u32;
 
                 loop {
                     let v: u32 = rng.gen_range(0, graph.nvertices() as u32);
@@ -766,7 +793,7 @@ fn glauber_color(
                         .enumerate()
                         .filter(|(_, x)| !x)
                         .map(|(i, _)| i)
-                        .nth(rng.gen_range(0, (unif_colors as usize) - nadjacent_colors))
+                        .nth(rng.gen_range(0, (budget as usize) - nadjacent_colors))
                         .expect("nth");
 
                     graph
@@ -789,21 +816,23 @@ fn glauber_color(
 
     println!(
         "sampled {}-coloring with {} MCMC steps, {:.1}% overhead on {} threads",
-        unif_colors,
+        budget,
         samples,
         100.0 * conflicts as f64 / samples as f64,
         nthreads
     );
 
-    let mut colors: Vec<_> = colors.into_iter().map(|x| x.into_inner()).collect();
+    let colors = colors.into_iter().map(|x| x.into_inner()).collect();
 
-    let mut ctr = unif_colors;
-    for (c, m) in colors.iter_mut().zip(mask.iter().copied()) {
-        if !m {
-            *c = ctr;
-            ctr += 1;
-        }
-    }
+    colors
+}
 
-    (ctr, colors)
+/// Initializes a random uniform assignment of nv vertices to budget colors, returning
+/// an array of size nv.
+fn random_improper_coloring(nv: u32, budget: u32) -> Vec<u32> {
+    let mut rng = StdRng::seed_from_u64(12345 as u64);
+    let mut current_color = 0;
+    let mut colors: Vec<_> = (0..nv).map(|i| budget * i / nv).collect();
+    colors.shuffle(&mut rng);
+    colors
 }
