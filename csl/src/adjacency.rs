@@ -157,6 +157,21 @@ impl AdjacencyList {
             .filter(move |&v| mask[v as usize])
     }
 
+    fn masked_neighbors_full<'a>(
+        &'a self,
+        v: Vertex,
+        mask: &'a [bool],
+    ) -> impl Iterator<Item = (usize, Vertex)> + 'a {
+        let v = v as usize;
+        let lo = self.offsets[v];
+        let hi = self.offsets[v + 1];
+        self.freqs[lo..hi]
+            .iter()
+            .copied()
+            .zip(self.all_neighbors[lo..hi].iter().copied())
+            .filter(move |(_, v)| mask[*v as usize])
+    }
+
     pub(crate) fn degree(&self, v: Vertex) -> usize {
         let v = v as usize;
         let lo = self.offsets[v];
@@ -435,6 +450,35 @@ impl AdjacencyList {
         assert!(max_degree == null);
 
         return_order
+    }
+
+    /// Given a vertex removal ordering for this graph, return a vector whose
+    /// i-th element is the `N^{(k)}` value for the subgraph over the vertices
+    /// `ordering[i..ordering.len()]`. Define `N^{(k)} = k * |E^{(k)}| + N^{(k-1)}`
+    /// where `E^{(k)}` is the set of edges appearing exactly `k` times and
+    /// `N^{(0)} = 0`.
+    pub(crate) fn turing_estimate(&self, k: usize, ordering: &Vec<Vertex>) -> Vec<usize> {
+        let mut mask = vec![true; self.nvertices()];
+        let nk = self
+            .freqs
+            .par_iter()
+            .copied()
+            .filter(|&f| f <= k)
+            .sum::<usize>()
+            / 2; // bidirectional frequencies
+        ordering
+            .iter()
+            .copied()
+            .scan(nk, |state, v| {
+                let nk = *state;
+                *state -= self
+                    .masked_neighbors_full(v, &mask)
+                    .map(|(f, _)| f)
+                    .sum::<usize>();
+                mask[v as usize] = false;
+                Some(nk)
+            })
+            .collect()
     }
 }
 

@@ -45,5 +45,5 @@ We will also need various tools for parsing/etc:
 
 ```
 npm install -g relaxed-json
-sudo apt install -y vowpal-wabbit datamash
+sudo apt install -y vowpal-wabbit datamash zstd
 ```

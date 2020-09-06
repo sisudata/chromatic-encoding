@@ -25,6 +25,19 @@ enum Compression {
 
 }
 
+arg_enum! {
+
+#[derive(Debug)]
+enum CutoffStyle {
+    Zero,
+    Earliest,
+    Ballpark,
+    Optimized,
+    Full
+}
+
+}
+
 /// Reads a set of training and validation set files from disk. Each
 /// file is treated as a u8 byte block. The only special characters
 /// are '\n', ':', and ' '. The first word on each line should be ASCII
@@ -107,6 +120,11 @@ struct Opt {
     #[structopt(long, possible_values = &Compression::variants(), case_insensitive = true)]
     compress: Compression,
 
+    /// Designate the compression methodology after performing coloring, which
+    /// can be either target encoding or submodular expansion.
+    #[structopt(long, possible_values = &CutoffStyle::variants(), case_insensitive = true)]
+    cutoff_style: CutoffStyle,
+
     /// The column budget controls what the maximum number of output columns
     /// will be. For target encoding, this can be relatively small, there's no
     /// sense in it being larger than the chromatic number of the co-ocurrence
@@ -130,22 +148,9 @@ struct Opt {
     #[structopt(long)]
     dump_graph: Option<PathBuf>,
 
-    /// If specified, use a forced edge filtration count to generate the graph
-    /// used in the chromatic representation.
-    ///
-    /// Automatically triggers Glauber coloring instead.
-    #[structopt(long)]
-    force_filter: Option<usize>,
-
     /// Number of samples to use for glauber coloring.
     #[structopt(long)]
     glauber_samples: Option<usize>,
-
-    /// If --print-new-edges is specified, then prints diagnostic information
-    /// about the frequency of new edges (and new edges between vertices of
-    /// the same color)
-    #[structopt(long)]
-    print_new_edges: bool,
 
     /// If --print-new-edges is specified, then uses this value of k to show
     /// diagnostics about color collisions for the filtered, thresholded graph
@@ -155,23 +160,6 @@ struct Opt {
     /// If this is set to 0 (the default), then these diagnostics are not printed.
     #[structopt(long, default_value = "0")]
     k: usize,
-
-    /// If --print-new-edges is specified, then uses this value of max_k
-    /// to show graphical diagnostics about the k-filtered co-occurrence
-    /// graphs, with k varying between [1, max_k].
-    #[structopt(long, default_value = "64")]
-    max_k: usize,
-
-    /// See `k` argument. If left empty then a single reasonable number
-    /// of colors will be chosen for you for Glauber coloring.
-    #[structopt(long)]
-    diagnostic_colors: Option<Vec<usize>>,
-
-    /// See `k` argument. If --nofilter is on, then for the diagnostics
-    /// printed due to the `k` flag (collisions from Glauber coloring),
-    /// no pre-emptive largest-first filtering is performed.
-    #[structopt(long)]
-    nofilter: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -209,6 +197,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         Compression::Unbiased => (csl::Compression::Unbiased, format!("{}un.svm", opt.budget)),
     };
 
+    let cutoff_style = match opt.cutoff_style {
+        CutoffStyle::Zero => csl::CutoffStyle::Zero,
+        CutoffStyle::Earliest => csl::CutoffStyle::Earliest,
+        CutoffStyle::Ballpark => csl::CutoffStyle::Ballpark,
+        CutoffStyle::Optimized => csl::CutoffStyle::Optimized,
+        CutoffStyle::Full => csl::CutoffStyle::Full,
+    };
+
     csl::read_featurize_write(
         opt.train,
         opt.valid,
@@ -218,14 +214,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         opt.budget,
         opt.dump_graph,
         opt.freq_cutoff,
-        opt.print_new_edges,
         opt.split_rate,
         opt.k,
-        opt.max_k,
-        opt.diagnostic_colors.unwrap_or(vec![]),
-        opt.nofilter,
-        opt.force_filter,
         opt.glauber_samples,
+        cutoff_style,
     )?;
     Ok(())
 }

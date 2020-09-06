@@ -22,6 +22,7 @@ use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use rayon;
 use rayon::iter::ParallelIterator;
 use rayon::prelude::*;
+use std::convert::TryInto;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -32,6 +33,14 @@ use svm_scanner::SvmScanner;
 
 pub type Compression = categorical::Compression;
 
+pub enum CutoffStyle {
+    Zero, // All-Glauber coloring
+    Earliest,
+    Ballpark,  // cutoff when 2 * maxdeg == prefix length
+    Optimized, // Solve full N^k problem
+    Full,      // Use all largest-first
+}
+
 pub fn read_featurize_write(
     train: Vec<PathBuf>,
     valid: Vec<PathBuf>,
@@ -41,14 +50,10 @@ pub fn read_featurize_write(
     budget: usize,
     dump_graph: Option<PathBuf>,
     freq_cutoff: usize,
-    print_new_edges: bool,
     split_rate: usize,
     threshold_k: usize,
-    max_k: usize,
-    diagnostic_colors: Vec<usize>,
-    _nofilter: bool,
-    force_filter: Option<usize>,
     glauber_samples: Option<usize>,
+    cutoff_style: CutoffStyle,
 ) -> Result<(), Box<dyn Error>> {
     let first_train_path = train[0].clone();
 
@@ -121,20 +126,6 @@ pub fn read_featurize_write(
             println!("dump graph {:.0?}", Instant::now().duration_since(start));
         }
 
-        if let Some(filter) = force_filter {
-            let mut index = 0;
-            edges_vec.retain(|_| {
-                index += 1;
-                edge_freqs[index - 1] >= filter
-            });
-            edge_freqs.retain(|&f| f >= filter);
-            println!(
-                "filter to {} edges occuring at least {} times",
-                edges_vec.len(),
-                filter
-            );
-        }
-
         let start = Instant::now();
         let mut graph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
         println!(
@@ -162,7 +153,10 @@ pub fn read_featurize_write(
         let (ncolors, color) = if let Some(nsamples) = glauber_samples {
             graph.internal_sort();
             let budget = budget as u32;
-            (budget, glauber_color(&graph, budget, Some(nsamples)))
+            (
+                budget,
+                glauber_color(&graph, budget, cutoff_style, threshold_k, Some(nsamples)),
+            )
         } else {
             greedy_color(&graph)
         };
@@ -171,147 +165,6 @@ pub fn read_featurize_write(
             Instant::now().duration_since(start)
         );
         println!("greedy num colors {}", ncolors);
-
-        if print_new_edges {
-            let valid = SvmScanner::new(valid.clone(), nthreads, delimiter)?;
-            let (edges_vec, edge_freqs, edge_stats) = edges::collect_edges(&valid, &featurizer);
-            let mut valid_graph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
-            let valid_n = edge_stats.nlines();
-
-            println!("evaluating graphs at different thresholds k");
-
-            let start = Instant::now();
-
-            graph.internal_sort();
-            valid_graph.internal_sort();
-
-            let train_n = nlines;
-
-            let (rate, std) = color_collision_count(&valid, &featurizer, &color);
-            println!("color collision count {}", rate);
-            println!("color collision std {}", std);
-
-            if max_k > 0 {
-                // substitute 3 with 64 for graphs in Appendix
-                let ks = (1..=max_k).collect::<Vec<_>>();
-                let mut gt_ests = Vec::new();
-                let mut actual_new_edges = Vec::new();
-                let mut max_degrees = Vec::new();
-                let mut avg_degrees = Vec::new();
-
-                let mut good_turing = 0;
-                let mask = vec![true; graph.nvertices()];
-                for &k in &ks {
-                    good_turing += k * graph.appeared_k(k, &mask);
-                    let gt_est = good_turing as f64 / train_n as f64;
-                    gt_ests.push(gt_est);
-
-                    let missing_edgecount = graph.nmissing(k, &mut valid_graph, &mask);
-                    let actual = missing_edgecount as f64 / valid_n as f64;
-                    actual_new_edges.push(actual);
-
-                    let (max_degree, avg_degree) = graph.filter_degree(k);
-                    max_degrees.push(max_degree);
-                    avg_degrees.push(avg_degree);
-                }
-
-                println!("thresholded k {:?}", ks);
-                println!("thresholded max degree {:?}", max_degrees);
-                println!("thresholded avg degree {:?}", avg_degrees);
-                println!("thresholded Good-Turing estimate {:?}", gt_ests);
-                println!("thresholded actual new edge avg {:?}", actual_new_edges);
-
-                let mut gt_ests = Vec::new();
-                let mut actual_new_edges = Vec::new();
-                let mut max_degrees = Vec::new();
-                let mut avg_degrees = Vec::new();
-                let mut discrete_vertices = Vec::new();
-
-                let par_results = ks
-                    .par_iter()
-                    .map(|&k| {
-                        let unfiltered_graph = &graph;
-
-                        let mut graph = graph.filter(k);
-                        graph.internal_sort();
-
-                        // We represent the `cutoff`-largest degree vertices of the
-                        // largest-first order "discretely", choosing cutoff such that
-                        // twice the degree of the subgraph without the discrete vertices
-                        // is smaller than the number of discrete vertices. Using fewer than
-                        // this many vertices doesn't make sense, since you need to color with
-                        // at least 2 * degree colors anyway, generating that many columns.
-                        let lf = graph.largest_first();
-                        let cutoff = lf
-                            .iter()
-                            .map(|(_, deg)| *deg as usize)
-                            .enumerate()
-                            .position(|(i, deg)| deg * 2 < i)
-                            .unwrap_or(lf.len());
-
-                        let mut mask = vec![true; lf.len()];
-                        for (v, _) in &lf[0..cutoff] {
-                            mask[*v as usize] = false;
-                        }
-
-                        let good_turing = (1..=k)
-                            .map(|j| j * unfiltered_graph.appeared_k(j, &mask))
-                            .sum::<usize>();
-                        let gt_est = good_turing as f64 / train_n as f64;
-
-                        let missing_edgecount = graph.nmissing(k, &valid_graph, &mask);
-                        let actual = missing_edgecount as f64 / valid_n as f64;
-
-                        (
-                            gt_est,
-                            cutoff,
-                            actual,
-                            graph.max_degree(&mask),
-                            graph.avg_degree(&mask),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-
-                for x in par_results {
-                    let (gt_est, cutoff, actual, max_degree, avg_degree) = x;
-                    gt_ests.push(gt_est);
-                    discrete_vertices.push(cutoff);
-                    actual_new_edges.push(actual);
-                    max_degrees.push(max_degree);
-                    avg_degrees.push(avg_degree);
-                }
-
-                println!("filtered thresholded k {:?}", ks);
-                println!("filtered thresholded num discrete {:?}", discrete_vertices);
-                println!("filtered thresholded max degree {:?}", max_degrees);
-                println!("filtered thresholded avg degree {:?}", avg_degrees);
-                println!("filtered thresholded Good-Turing estimate {:?}", gt_ests);
-                println!(
-                    "filtered thresholded actual new edge avg {:?}",
-                    actual_new_edges
-                );
-            }
-
-            if threshold_k > 0 {
-                let collisions: Vec<_> = diagnostic_colors
-                    .par_iter()
-                    .map(|&c| {
-                        let mut graph = graph.filter(threshold_k);
-                        graph.internal_sort();
-
-                        let colors = glauber_color(&graph, c as u32, None);
-                        let (rate, std) = color_collision_count(&valid, &featurizer, &colors);
-                        (c, rate, std)
-                    })
-                    .collect();
-                println!("glauber collisions {:?}", collisions);
-            }
-
-            println!(
-                "new color co-occurrence assessment {:.0?}",
-                Instant::now().duration_since(start)
-            );
-        }
 
         if cfg!(debug_assertions) {
             validate_coloring(ncolors as usize, &color, &train, &featurizer);
@@ -666,16 +519,73 @@ fn color_collision_count(
 /// Accepts a mask to operate on the induced subgraph of the given graph. Vertices
 /// that are masked out are given std::u32::MAX  colors. Uses `unif_colors` for the coloring,
 /// which should be at least the number of colors used for a greedy coloring.
-fn glauber_color(graph: &AdjacencyList, budget: u32, nsamples: Option<usize>) -> Vec<u32> {
-    // TODO: possibly --nofilter here
+fn glauber_color(
+    graph: &AdjacencyList,
+    budget: u32,
+    cutoff_style: CutoffStyle,
+    threshold_k: usize,
+    nsamples: Option<usize>,
+) -> Vec<u32> {
+    let supergraph = graph;
+    let mut graph = supergraph.filter(threshold_k);
+    graph.internal_sort();
+
     let lf = graph.largest_first();
-    let cutoff = 0;
-    println!("cutoff after vertex {} budget {}", cutoff, budget);
+    let lf_turing: Vec<_> = supergraph
+        .turing_estimate(1, &lf.iter().map(|(v, _)| *v).collect())
+        .into_iter()
+        .zip(lf.into_iter())
+        .map(|(nk, (v, deg))| (v, deg, nk))
+        .collect();
+    let inf = lf_turing[0].2 + 1;
+    let optimized_cutoff: usize = lf_turing
+        .iter()
+        .enumerate()
+        .min_by_key(|(i, (_, deg, nk))| {
+            let budget = budget as usize - *i;
+            let deg = *deg as usize;
+            if budget <= deg * 2 {
+                return inf;
+            }
+            *nk / (budget - deg * 2)
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let earliest_cutoff: usize = lf_turing
+        .iter()
+        .map(|(_, deg, _)| *deg as usize)
+        .enumerate()
+        .position(|(i, deg)| {
+            deg * 2
+                < budget
+                    .saturating_sub(i.try_into().unwrap())
+                    .try_into()
+                    .unwrap()
+        })
+        .unwrap_or(lf_turing.len());
+    let ballpark_cutoff: usize = lf_turing
+        .iter()
+        .map(|(_, deg, _)| *deg as usize)
+        .enumerate()
+        .position(|(i, deg)| deg * 2 < i)
+        .unwrap_or(lf_turing.len());
+
+    println!("optimized cutoff after vertex {}", optimized_cutoff);
+    println!("viable budget is {}", budget);
+    println!("ballpark cutoff {}", ballpark_cutoff);
+
+    let cutoff = match cutoff_style {
+        Zero => 0,
+        Earliest => earliest_cutoff,
+        Ballpark => ballpark_cutoff,
+        Optimized => optimized_cutoff,
+        Full => lf_turing.len(),
+    };
 
     let nv = graph.nvertices() as u32;
     let mut colors = random_improper_coloring(nv, nv.min(budget));
     let mut budget = budget;
-    for (v, _) in &lf[0..cutoff] {
+    for (v, _, _) in &lf_turing[0..cutoff] {
         if budget == 0 {
             break;
         }
@@ -688,7 +598,7 @@ fn glauber_color(graph: &AdjacencyList, budget: u32, nsamples: Option<usize>) ->
     }
 
     let ref mut mask = vec![true; graph.nvertices()];
-    for (v, _) in &lf[0..cutoff] {
+    for (v, _, _) in &lf_turing[0..cutoff] {
         mask[*v as usize] = false;
     }
     let (greedy_ncolors, greedy_colors) = greedy_color_masked(&graph, mask);

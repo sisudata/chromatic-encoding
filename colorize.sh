@@ -11,11 +11,11 @@
 
 set -euo pipefail
     
-bits=$(seq 10 18)
-nthreads=64
-num_concurrent_datasets=1
+bits="10 14 18"
+nthreads=47
+num_concurrent_datasets=2
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
-dst_s3="s3://sisu-datasets/un-noprefix-svms/"
+dst_s3="s3://sisu-datasets/unbiased-svms/"
 datasets="url kdda kddb kdd12"
 
 for dataset in $datasets ; do
@@ -29,7 +29,7 @@ for compress_suffix in "FrequencyTruncation ft" "Unbiased un"; do
 compress=$(echo $compress_suffix | cut -d" " -f1)
 
 if [ "$compress" = "Unbiased" ]; then
-  flags="--threshold_k 1 --glauber_samples 100000000"  
+  flags="--k 1 --cutoff-style Ballpark --glauber-samples 100000000"  
 fi
 echo \
   --budget $budget --compress ${compress} \
@@ -38,24 +38,19 @@ echo \
 done
 done | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/csl >/dev/null
 
-RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/csl 
-  --budget $budget --compress SubmodularExpansion --parsimonious \
-  --train ./svms-data/${dataset}.train.svm \
-  --valid ./svms-data/${dataset}.test.svm >/dev/null
+# echo "parallel taring $dataset into ./svms-data/${dataset}.tar.zst"
 
-echo "parallel taring $dataset into ./svms-data/${dataset}.tar.zst"
-
-tar -I "pzstd -p $total_parallelism" -cf ./svms-data/${dataset}.tar.zst \
-  ./svms-data/${dataset}.{train,test}.svm \
-  ./svms-data/${dataset}.{train,test}.{sm,ft}*.svm
+# tar -I "pzstd -p $total_parallelism" -cf ./svms-data/${dataset}.tar.zst \
+#   ./svms-data/${dataset}.{train,test}.svm \
+#   ./svms-data/${dataset}.{train,test}.{sm,ft}*.svm
   
-echo "uploading to s3"
-aws s3 cp ./svms-data/${dataset}.tar.zst "$dst_s3${dataset}.tar.zst"
-for t in train test ; do for s in sm ft ; do
-cp ./svms-data/${dataset}.${t}.${s}1024.svm ./svms-data/saved${dataset}.${t}.${s}1024.svm
-done ; done
-rm ./svms-data/${dataset}.{train,test}.{un,ft}*.svm \
-   ./svms-data/${dataset}.{train,test}.{ft,ht}*.svm.field_dims.txt
+# echo "uploading to s3"
+# aws s3 cp ./svms-data/${dataset}.tar.zst "$dst_s3${dataset}.tar.zst"
+# for t in train test ; do for s in sm ft ; do
+# cp ./svms-data/${dataset}.${t}.${s}1024.svm ./svms-data/saved${dataset}.${t}.${s}1024.svm
+# done ; done
+# rm ./svms-data/${dataset}.{train,test}.{un,ft}*.svm \
+#    ./svms-data/${dataset}.{train,test}.{ft,ht}*.svm.field_dims.txt
   
 done # dataset
 
