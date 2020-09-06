@@ -40,3 +40,9 @@ pip install --force-reinstall git+https://github.com/vlad17/pytorch-fm/
 ```
 
 For GPU machines, you'll need to install a gpu version of pytorch over this env.
+
+We will also need various tools for parsing/etc:
+
+```
+npm install -g relaxed-json
+```

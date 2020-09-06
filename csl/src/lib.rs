@@ -486,11 +486,15 @@ fn greedy_color_masked(graph: &AdjacencyList, mask: &[bool]) -> (u32, Vec<u32>) 
 
     let ncolors = adjacent_colors.len();
     let mut color_counts = vec![0u32; ncolors];
-    colors.iter().copied().zip(mask.iter().copied()).for_each(|(c, masked)| {
-        if masked {
-            color_counts[c as usize] += 1;
-        }
-    });
+    colors
+        .iter()
+        .copied()
+        .zip(mask.iter().copied())
+        .for_each(|(c, masked)| {
+            if masked {
+                color_counts[c as usize] += 1;
+            }
+        });
 
     let code: Vec<_> = (0..ncolors)
         .sorted_by_key(|i| -(color_counts[*i] as i64))
@@ -501,9 +505,9 @@ fn greedy_color_masked(graph: &AdjacencyList, mask: &[bool]) -> (u32, Vec<u32>) 
     }
 
     for (i, color) in colors.iter_mut().enumerate() {
-    	if !mask[i] {
-	   continue;
-	}
+        if !mask[i] {
+            continue;
+        }
         *color = recode[*color as usize];
     }
 

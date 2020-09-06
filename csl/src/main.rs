@@ -19,7 +19,8 @@ enum Compression {
     FieldAwareFrequencyTruncation,
     SubmodularSort,
     NoSplitSubmodularSort,
-    Identity
+    Identity,
+    Unbiased
 }
 
 }
@@ -205,6 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             format!("{}ns.svm", opt.budget),
         ),
         Compression::Identity => (csl::Compression::Identity, format!("{}id.svm", opt.budget)),
+        Compression::Unbiased => (csl::Compression::Unbiased, format!("{}un.svm", opt.budget)),
     };
 
     csl::read_featurize_write(

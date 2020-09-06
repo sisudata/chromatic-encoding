@@ -1,5 +1,6 @@
 //! The identity encoder which keeps the original cateogrical value.
 
+use std::convert::TryInto;
 use std::io::Write;
 use std::time::Instant;
 
@@ -15,12 +16,18 @@ pub(crate) struct EncodingDictionary {
 pub(crate) struct Encoder {
     // The feature that occupies the current color categorical column.
     // sentinel value of 0 means not occupied
-    features: Vec<u32>,
+    features: Vec<i64>,
+    unbiased: bool, // how to handle collisions
 }
 
 impl EncodingDictionary {
     pub(crate) fn new(budget: usize, ncolors: usize, colors: Vec<u32>) -> Self {
-        assert!(budget >= ncolors, "budget {} <= ncolors {}", budget, ncolors);
+        assert!(
+            budget >= ncolors,
+            "budget {} <= ncolors {}",
+            budget,
+            ncolors
+        );
 
         let start = Instant::now();
         let mut recode = colors.clone();
@@ -50,9 +57,10 @@ impl EncodingDictionary {
 }
 
 impl Encoder {
-    pub(crate) fn new(dictionary: &EncodingDictionary) -> Self {
+    pub(crate) fn new(dictionary: &EncodingDictionary, unbiased: bool) -> Self {
         Encoder {
-            features: vec![0u32; dictionary.ncolors],
+            features: vec![0i64; dictionary.ncolors],
+            unbiased,
         }
     }
 
@@ -63,11 +71,15 @@ impl Encoder {
 
         // Features can overlap if the data is outside the set used for training.
 
-        // Favor less popular features, i.e., ones with a higher index
-        // The way we re-coded was monotonic wrt the original feature index, which was
-        // already reverse-sorted with respect to popularity.
-
-        self.features[c] = self.features[c].max(code)
+        if self.unbiased {
+            // Use a random bit
+            self.features[c] += ((h & 1) as i64) * 2 - 1;
+        } else {
+            // Favor less popular features, i.e., ones with a higher index
+            // The way we re-coded was monotonic wrt the original feature index, which was
+            // already reverse-sorted with respect to popularity.
+            self.features[c] = self.features[c].max(code.try_into().unwrap())
+        }
     }
 
     pub(crate) fn dense_offset(&self) -> usize {

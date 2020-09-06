@@ -11,7 +11,7 @@
 # compress should be 'ht' (hashing trick, suffix is empty string
 # to get dataset file)
 #
-# else one of sm, te, ft, sn, ss, ns
+# else one of sm, te, ft, sn, ss, ns, un
 #
 # Note that for ht the budget should be a power of 2
 

@@ -41,6 +41,7 @@ pub enum Compression {
     SubmodularSort,
     NoSplitSubmodularSort,
     Identity,
+    Unbiased,
 }
 
 /// A learned categorical encoding dictionary
@@ -108,6 +109,9 @@ impl EncodingDictionary {
             Compression::Identity => EncodingDictionaryVariant::Identity(
                 identity::EncodingDictionary::new(budget, ncolors, colors),
             ),
+            Compression::Unbiased => EncodingDictionaryVariant::Unbiased(
+                identity::EncodingDictionary::new(budget, ncolors, colors),
+            ),
         };
         Self { variant }
     }
@@ -142,7 +146,10 @@ impl EncodingDictionary {
                 ))
             }
             EncodingDictionaryVariant::Identity(ref dictionary) => {
-                EncoderVariant::Identity(identity::Encoder::new(dictionary))
+                EncoderVariant::Identity(identity::Encoder::new(dictionary, false))
+            }
+            EncodingDictionaryVariant::Unbiased => {
+                EncoderVariant::Unbiased(identity::Encoder::new(dictionary, true))
             }
         };
         Encoder {
@@ -268,6 +275,7 @@ enum EncodingDictionaryVariant {
     SubmodularSort(submodular_expansion::EncodingDictionary),
     NoSplitSubmodularSort(submodular_expansion::EncodingDictionary),
     Identity(identity::EncodingDictionary),
+    Unbiased(identity::EncodingDictionary),
 }
 
 enum EncoderVariant {
@@ -279,4 +287,5 @@ enum EncoderVariant {
     SubmodularSort(submodular_expansion::Encoder),
     NoSplitSubmodularSort(submodular_expansion::Encoder),
     Identity(identity::Encoder),
+    Unbiased(identity::Encoder),
 }
