@@ -15,7 +15,7 @@ bits=$(seq 10 18)
 nthreads=64
 num_concurrent_datasets=1
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
-dst_s3="s3://sisu-datasets/binary-svms/"
+dst_s3="s3://sisu-datasets/un-svms/"
 datasets="url kdda kddb kdd12"
 
 for dataset in $datasets ; do
@@ -25,13 +25,16 @@ echo "compressing $dataset across bits $(echo $bits)"
 for i in $bits ; do 
 budget=$((1 << $i))
 
-for compress_suffix in "FrequencyTruncation ft" "SubmodularExpansion sm"; do 
+for compress_suffix in "FrequencyTruncation ft" "Unbiased un"; do 
 compress=$(echo $compress_suffix | cut -d" " -f1)
 
+if [ "$compress" = "Unbiased" ]; then
+  flags="--threshold_k 1 --glauber_samples 100000000"  
+fi
 echo \
   --budget $budget --compress ${compress} \
   --train ./svms-data/${dataset}.train.svm \
-  --valid ./svms-data/${dataset}.test.svm 
+  --valid ./svms-data/${dataset}.test.svm $flags
 done
 done | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/csl >/dev/null
 
@@ -51,10 +54,12 @@ aws s3 cp ./svms-data/${dataset}.tar.zst "$dst_s3${dataset}.tar.zst"
 for t in train test ; do for s in sm ft ; do
 cp ./svms-data/${dataset}.${t}.${s}1024.svm ./svms-data/saved${dataset}.${t}.${s}1024.svm
 done ; done
-rm ./svms-data/${dataset}.{train,test}.{sm,ft}*.svm \
+rm ./svms-data/${dataset}.{train,test}.{un,ft}*.svm \
    ./svms-data/${dataset}.{train,test}.{ft,ht}*.svm.field_dims.txt
   
 done # dataset
+
+exit 0
 
 budget=1024
 for dataset in $datasets ; do
