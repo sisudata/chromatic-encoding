@@ -9,7 +9,7 @@ if [ -f $results ]; then
 fi 
 
 bits=$(seq 10 18)
-src_s3="s3://sisu-datasets/un-svms/"
+src_s3="s3://sisu-datasets/un-noprefix-svms/"
 nthreads=64
 
 for dataset in url kdda kddb kdd12 ; do

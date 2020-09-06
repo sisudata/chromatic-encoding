@@ -669,13 +669,8 @@ fn color_collision_count(
 fn glauber_color(graph: &AdjacencyList, budget: u32, nsamples: Option<usize>) -> Vec<u32> {
     // TODO: possibly --nofilter here
     let lf = graph.largest_first();
-    let cutoff = lf
-        .iter()
-        .map(|(_, deg)| *deg as usize)
-        .enumerate()
-        .position(|(i, deg)| deg * 2 < i)
-        .unwrap_or(lf.len());
-    println!("cutoff after vertex {}", cutoff);
+    let cutoff = 0;
+    println!("cutoff after vertex {} budget {}", cutoff, budget);
 
     let nv = graph.nvertices() as u32;
     let mut colors = random_improper_coloring(nv, nv.min(budget));

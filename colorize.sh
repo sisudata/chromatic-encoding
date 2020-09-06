@@ -15,7 +15,7 @@ bits=$(seq 10 18)
 nthreads=64
 num_concurrent_datasets=1
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
-dst_s3="s3://sisu-datasets/un-svms/"
+dst_s3="s3://sisu-datasets/un-noprefix-svms/"
 datasets="url kdda kddb kdd12"
 
 for dataset in $datasets ; do
