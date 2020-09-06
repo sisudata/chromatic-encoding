@@ -148,7 +148,7 @@ impl EncodingDictionary {
             EncodingDictionaryVariant::Identity(ref dictionary) => {
                 EncoderVariant::Identity(identity::Encoder::new(dictionary, false))
             }
-            EncodingDictionaryVariant::Unbiased => {
+            EncodingDictionaryVariant::Unbiased(ref dictionary) => {
                 EncoderVariant::Unbiased(identity::Encoder::new(dictionary, true))
             }
         };
@@ -213,6 +213,10 @@ impl<'a> Encoder<'a> {
                 EncodingDictionaryVariant::Identity(dictionary),
                 EncoderVariant::Identity(ref mut variant),
             ) => variant.observe(dictionary, feature),
+            (
+                EncodingDictionaryVariant::Unbiased(dictionary),
+                EncoderVariant::Unbiased(ref mut variant),
+            ) => variant.observe(dictionary, feature),
             _ => panic!("mismatched dictionary/encoder variants"),
         }
     }
@@ -231,6 +235,7 @@ impl<'a> Encoder<'a> {
             EncoderVariant::SubmodularSort(ref variant) => variant.dense_offset(),
             EncoderVariant::NoSplitSubmodularSort(ref variant) => variant.dense_offset(),
             EncoderVariant::Identity(ref variant) => variant.dense_offset(),
+            EncoderVariant::Unbiased(ref variant) => variant.dense_offset(),
         }
     }
 
@@ -247,6 +252,7 @@ impl<'a> Encoder<'a> {
             EncoderVariant::SubmodularSort(e) => e.skip_example(d),
             EncoderVariant::NoSplitSubmodularSort(_) => false,
             EncoderVariant::Identity(_) => false,
+            EncoderVariant::Unbiased(_) => false,
         }
     }
 
@@ -262,6 +268,7 @@ impl<'a> Encoder<'a> {
             EncoderVariant::SubmodularSort(ref mut variant) => variant.finish(writer),
             EncoderVariant::NoSplitSubmodularSort(ref mut variant) => variant.finish(writer),
             EncoderVariant::Identity(ref mut variant) => variant.finish(writer),
+            EncoderVariant::Unbiased(ref mut variant) => variant.finish(writer),
         }
     }
 }
