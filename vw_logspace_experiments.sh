@@ -31,7 +31,7 @@ quiet="yes"
 delete="no"
 quadratic="no"
 echo vw.sh $budget $dataset ht $quiet $delete $quadratic
-echo vw.sh $budget $dataset un $quiet $delete $quadratic
+echo vw.sh $budget $dataset sm $quiet $delete $quadratic
 echo vw.sh $budget $dataset ft $quiet $delete $quadratic
 done | xargs -P $nthreads -L1 /bin/bash >> $results
 

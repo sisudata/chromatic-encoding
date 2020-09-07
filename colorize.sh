@@ -11,23 +11,23 @@
 
 set -euo pipefail
     
-bits="10 14 18"
-nthreads=16
-num_concurrent_datasets=4
+bits="10 12 14 16 18"
+nthreads=15
+num_concurrent_datasets=6
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/unbiased-svms/"
 datasets="url kdda"
 
-cutoff=Earliest
+cutoff=Double
 echo "compressing $datasets across bits $(echo $bits) cutoff $cutoff"
 
 for dataset in $datasets ; do
 
 for i in $bits ; do 
 budget=$((1 << $i))
-flags="--k 10 --cutoff-style $cutoff --glauber-samples 10000000"
+flags="--k 1 --cutoff-style $cutoff --glauber-samples 10000000"
 
-for compress_suffix in "FrequencyTruncation ft" "Unbiased un"; do 
+for compress_suffix in "FrequencyTruncation ft" "SubmodularExpansion sm"; do 
 compress=$(echo $compress_suffix | cut -d" " -f1)
 
 echo \
