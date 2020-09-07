@@ -34,7 +34,8 @@ use svm_scanner::SvmScanner;
 pub type Compression = categorical::Compression;
 
 pub enum CutoffStyle {
-    Zero, // All-Glauber coloring
+    Zero,   // All-Glauber coloring
+    Double, // Double avg degree for colors (Erdos-renyi model)
     Earliest,
     Ballpark,  // cutoff when 2 * maxdeg == prefix length
     Optimized, // Solve full N^k problem
@@ -153,10 +154,7 @@ pub fn read_featurize_write(
         let (ncolors, color) = if let Some(nsamples) = glauber_samples {
             graph.internal_sort();
             let budget = budget as u32;
-            (
-                budget,
-                glauber_color(&graph, budget, cutoff_style, threshold_k, Some(nsamples)),
-            )
+            glauber_color(&graph, budget, cutoff_style, threshold_k, Some(nsamples))
         } else {
             greedy_color(&graph)
         };
@@ -525,7 +523,8 @@ fn glauber_color(
     cutoff_style: CutoffStyle,
     threshold_k: usize,
     nsamples: Option<usize>,
-) -> Vec<u32> {
+) -> (u32, Vec<u32>) {
+    let orig_budget = budget;
     let supergraph = graph;
     let mut graph = supergraph.filter(threshold_k);
     graph.internal_sort();
@@ -577,6 +576,7 @@ fn glauber_color(
 
     let cutoff = match cutoff_style {
         CutoffStyle::Zero => 0,
+        CutoffStyle::Double => 0,
         CutoffStyle::Earliest => earliest_cutoff,
         CutoffStyle::Ballpark => ballpark_cutoff,
         CutoffStyle::Optimized => optimized_cutoff,
@@ -595,7 +595,7 @@ fn glauber_color(
     }
 
     if budget == 0 {
-        return colors;
+        return (orig_budget, colors);
     }
 
     let ref mut mask = vec![true; graph.nvertices()];
@@ -608,7 +608,7 @@ fn glauber_color(
         greedy_ncolors, budget
     );
     if greedy_ncolors > budget {
-        return colors;
+        return (orig_budget, colors);
     }
     for v in 0..graph.nvertices() {
         if mask[v] {
@@ -638,6 +638,12 @@ fn glauber_color(
     use std::sync::atomic::{AtomicU32, Ordering};
 
     let samples = nsamples.unwrap_or(max_degree * subgraph_sz);
+    let (ncolors, budget) = if let CutoffStyle::Double = cutoff_style {
+        let ncolors = greedy_ncolors.max((avg_degree * 2.) as u32);
+        (ncolors, ncolors)
+    } else {
+        (orig_budget, budget)
+    };
 
     let colors = colors
         .into_iter()
@@ -738,7 +744,7 @@ fn glauber_color(
 
     let colors = colors.into_iter().map(|x| x.into_inner()).collect();
 
-    colors
+    (ncolors, colors)
 }
 
 /// Initializes a random uniform assignment of nv vertices to budget colors, returning

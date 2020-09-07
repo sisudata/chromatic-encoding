@@ -30,6 +30,7 @@ arg_enum! {
 #[derive(Debug)]
 enum CutoffStyle {
     Zero,
+    Double,
     Earliest,
     Ballpark,
     Optimized,
@@ -199,6 +200,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cutoff_style = match opt.cutoff_style {
         CutoffStyle::Zero => csl::CutoffStyle::Zero,
+        CutoffStyle::Double => csl::CutoffStyle::Double,
         CutoffStyle::Earliest => csl::CutoffStyle::Earliest,
         CutoffStyle::Ballpark => csl::CutoffStyle::Ballpark,
         CutoffStyle::Optimized => csl::CutoffStyle::Optimized,
