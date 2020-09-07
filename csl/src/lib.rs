@@ -603,8 +603,11 @@ fn glauber_color(
         mask[*v as usize] = false;
     }
     let (greedy_ncolors, greedy_colors) = greedy_color_masked(&graph, mask);
+    println!(
+        "greedy ncolors {} remaining budget {}",
+        greedy_ncolors, budget
+    );
     if greedy_ncolors > budget {
-        println!("greedy ncolors {} exceeds remaining budget {}", greedy_ncolors, budget);
         return colors;
     }
     for v in 0..graph.nvertices() {
