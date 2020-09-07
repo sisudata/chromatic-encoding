@@ -90,7 +90,7 @@ impl Encoder {
         for i in 0..self.features.len() {
             let value = self.features[i];
 
-            if value > 0 {
+            if value != 0 {
                 write!(writer, " {}:{}", i, value).expect("successful write");
             }
 

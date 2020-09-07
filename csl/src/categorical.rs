@@ -167,6 +167,7 @@ impl EncodingDictionary {
                 dictionary.field_dims()
             }
             EncodingDictionaryVariant::Identity(ref dictionary) => dictionary.field_dims(),
+            EncodingDictionaryVariant::Unbiased(ref dictionary) => dictionary.field_dims(),
             _ => {
                 let encoder = self.new_encoder();
                 vec![1; encoder.dense_offset()]

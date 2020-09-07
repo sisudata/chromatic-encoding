@@ -29,7 +29,7 @@ if [ "$compress" = "ht" ]; then
     suffix=""
     hash="--hash all"
 else
-    suffix=".${parsimonious}${compress}${budget}"
+    suffix=".${budget}${compress}"
     hash=""
 fi
 

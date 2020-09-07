@@ -573,13 +573,14 @@ fn glauber_color(
     println!("optimized cutoff after vertex {}", optimized_cutoff);
     println!("viable budget is {}", budget);
     println!("ballpark cutoff {}", ballpark_cutoff);
+    println!("earliest cutoff {}", earliest_cutoff);
 
     let cutoff = match cutoff_style {
-        Zero => 0,
-        Earliest => earliest_cutoff,
-        Ballpark => ballpark_cutoff,
-        Optimized => optimized_cutoff,
-        Full => lf_turing.len(),
+        CutoffStyle::Zero => 0,
+        CutoffStyle::Earliest => earliest_cutoff,
+        CutoffStyle::Ballpark => ballpark_cutoff,
+        CutoffStyle::Optimized => optimized_cutoff,
+        CutoffStyle::Full => lf_turing.len(),
     };
 
     let nv = graph.nvertices() as u32;
@@ -603,6 +604,7 @@ fn glauber_color(
     }
     let (greedy_ncolors, greedy_colors) = greedy_color_masked(&graph, mask);
     if greedy_ncolors > budget {
+        println!("greedy ncolors {} exceeds remaining budget {}", greedy_ncolors, budget);
         return colors;
     }
     for v in 0..graph.nvertices() {
