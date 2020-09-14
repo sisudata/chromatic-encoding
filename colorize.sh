@@ -12,11 +12,11 @@
 set -euo pipefail
     
 bits="10 12 14 16 18"
-nthreads=15
-num_concurrent_datasets=6
+nthreads=47
+num_concurrent_datasets=2
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/unbiased-svms/"
-datasets="url kdda"
+datasets="url kdda kddb"
 
 cutoff=Double
 echo "compressing $datasets across bits $(echo $bits) cutoff $cutoff"
@@ -24,8 +24,8 @@ echo "compressing $datasets across bits $(echo $bits) cutoff $cutoff"
 for dataset in $datasets ; do
 
 for i in $bits ; do 
-budget=$((1 << $i))
-flags="--k 1 --cutoff-style $cutoff --glauber-samples 10000000"
+    budget=$((1 << $i))
+flags="--k 10 --cutoff-style $cutoff --glauber-samples 10000000 "
 
 for compress_suffix in "FrequencyTruncation ft" "SubmodularExpansion sm"; do 
 compress=$(echo $compress_suffix | cut -d" " -f1)
@@ -36,7 +36,7 @@ echo \
   --valid ./svms-data/${dataset}.test.svm $flags
 done
 done
-done | shuf | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/csl >svms-data/log-colorize-${cutoff}.txt
+done | shuf | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1  ./csl/target/release/csl >svms-data/log-colorize-${cutoff}.txt
 
 # echo "parallel taring $dataset into ./svms-data/${dataset}.tar.zst"
 

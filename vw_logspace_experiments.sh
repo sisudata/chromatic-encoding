@@ -8,7 +8,7 @@ if [ -f $results ]; then
   mv $results /tmp
 fi 
 
-bits="10 14 18" # $(seq 10 18)
+bits="10 12 14 16 18" # $(seq 10 18)
 #src_s3="s3://sisu-datasets/un-noprefix-svms/"
 nthreads=64
 
