@@ -19,7 +19,7 @@ use crate::svm_scanner::{DelimIter, SvmScanner};
 use crate::unsafe_hasher::ThreadUnsafeHasher;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use pdatastructs::{countminsketch::CountMinSketch, hyperloglog::HyperLogLog};
+use pdatastructs::{filters::bloomfilter::BloomFilter, filters::Filter, hyperloglog::HyperLogLog};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
@@ -28,9 +28,11 @@ use std::iter::repeat_with;
 use std::slice;
 use std::sync::Mutex;
 
-type CMS = CountMinSketch<Edge, u8, BuildHasherDefault<ThreadUnsafeHasher>>;
-
 pub(crate) type Vertex = u32;
+
+pub struct RollingBloom {
+    blooms: Vec<BloomFilter<Edge, BuildHasherDefault<ThreadUnsafeHasher>>>,
+}
 
 /// Compressed representation of two vertices through bit concatenation.
 #[derive(Default, PartialEq, Hash, PartialOrd, Eq, Ord, Clone)]
@@ -61,13 +63,13 @@ impl GraphStats {
         self.max_nnz = self.max_nnz.max(other.max_nnz);
         self.sum_nnz += other.sum_nnz;
         self.sum_edges += other.sum_edges;
-	self.nskip += other.nskip;
+        self.nskip += other.nskip;
     }
 
     pub(crate) fn print(&self) {
         let avg_nnz = self.sum_nnz / self.nlines;
         let avg_edges = self.sum_edges / self.nlines as u128;
-	println!("num edges filtered by bloom {}", self.nskip);
+        println!("num edges filtered by bloom {}", self.nskip);
         println!("avg nnz per row {}", avg_nnz);
         println!("max nnz per row {}", self.max_nnz);
         println!("avg edges per row {}", avg_edges);
@@ -126,7 +128,7 @@ type EdgeMap = HashMap<Edge, EdgeStats, BuildHasherDefault<ThreadUnsafeHasher>>;
 pub(crate) fn collect_edges(
     train: &SvmScanner,
     featurizer: &Featurizer,
-    cms: &CMS,
+    cms: &RollingBloom,
     threshold_k: u8,
 ) -> (Vec<Edge>, Vec<usize>, GraphStats) {
     let nthreads = train.nthreads();
@@ -211,7 +213,7 @@ pub(crate) fn collect_edges(
 
 struct EdgeCollector<'a> {
     featurizer: &'a Featurizer,
-    cms: &'a CMS,
+    cms: &'a RollingBloom,
     threshold_k: u8,
     writers: &'a Vec<Mutex<EdgeMap>>,
     locals: Vec<EdgeMap>,
@@ -232,7 +234,7 @@ struct EdgeCollector<'a> {
 impl<'a> EdgeCollector<'a> {
     fn new<'b>(
         featurizer: &'b Featurizer,
-        cms: &'b CMS,
+        cms: &'b RollingBloom,
         writers: &'b Vec<Mutex<EdgeMap>>,
         shared_stats: &'b Mutex<GraphStats>,
         nthreads: usize,
@@ -268,11 +270,11 @@ impl<'a> EdgeCollector<'a> {
         }
 
         self.indices.sort_unstable();
-	let mut nskipped = 0usize;
+        let mut nskipped = 0usize;
         for (i, j) in self.indices.iter().copied().tuple_combinations() {
             let e = Edge::new(i, j);
-            if self.cms.query_point(&e) < self.threshold_k {
-	       nskipped += 1;
+            if self.cms.query(&e) < self.threshold_k as usize {
+                nskipped += 1;
                 continue;
             }
             Self::save_local(&mut self.locals, e);
@@ -448,6 +450,41 @@ pub(crate) fn estimate_edges(train: &SvmScanner, featurizer: &Featurizer) -> (us
     (candh.count, candh.hll.count())
 }
 
+impl RollingBloom {
+    fn new(k: usize, expected_num_unique: usize) -> Self {
+        let mut v = Vec::new();
+        let fpr = 0.10;
+        let decay = 2f64;
+        for i in 0i32..(k as i32) {
+            v.push(BloomFilter::with_properties_and_hash(
+                (expected_num_unique as f64 * (decay.powi(-i))) as usize,
+                0.10,
+                BuildHasherDefault::<ThreadUnsafeHasher>::default(),
+            ))
+        }
+        RollingBloom { blooms: v }
+    }
+
+    /// occurs at least (num returns) times
+    fn query(&self, e: &Edge) -> usize {
+        self.blooms
+            .iter()
+            .position(|bloom| !bloom.query(e))
+            .unwrap_or(self.blooms.len())
+    }
+
+    fn push(&mut self, e: &Edge, k: usize) {
+        self.blooms[k].insert(e).unwrap();
+    }
+
+    fn merge(&mut self, o: &Self) {
+        assert!(self.blooms.len() == o.blooms.len());
+        for i in 0..self.blooms.len() {
+            self.blooms[i].union(&o.blooms[i]);
+        }
+    }
+}
+
 /// creates bloom filter
 pub(crate) fn create_cms(
     train: &SvmScanner,
@@ -455,33 +492,28 @@ pub(crate) fn create_cms(
     threshold_k: u8,
     n_edges: usize,
     n_unique_edges: usize,
-) -> CMS {
-    let effective_max_edges = (n_unique_edges * threshold_k as usize).max(n_edges);
-    let eps = 1.0 / n_edges as f64 / 10.;
-    let delta = 0.01;
+) -> RollingBloom {
+    let delta = 0.05;
     let cms = {
         train
             .fold_reduce(
                 || {
                     EdgeVisitor::new(
                         featurizer,
-                        CountMinSketch::<Edge, u8, _>::with_point_query_properties_and_hasher(
-                            eps,
-                            delta,
-                            BuildHasherDefault::<ThreadUnsafeHasher>::default(),
-                        ),
+                        RollingBloom::new(threshold_k as usize, n_unique_edges),
                     )
                 },
                 |mut x, line| {
                     x.consume_line(line, |cms, edge| {
-                        if cms.query_point(&edge) < threshold_k {
-                            cms.add(&edge);
+                        let occurence = cms.query(&edge);
+                        if occurence < threshold_k as usize {
+                            cms.push(&edge, occurence);
                         }
                     });
                     x
                 },
                 |x, y| {
-                    x.merge(y, |l: &mut CountMinSketch<_, _, _>, r| {
+                    x.merge(y, |l: &mut RollingBloom, r| {
                         l.merge(&r);
                     })
                 },
@@ -489,4 +521,7 @@ pub(crate) fn create_cms(
             .reduced
     };
     cms
+
+    // TODO: rolling bloom instead, should be more reasonable.
+    // scaling blooms?x
 }
