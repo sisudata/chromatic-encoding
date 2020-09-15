@@ -19,6 +19,7 @@ use crate::svm_scanner::{DelimIter, SvmScanner};
 use crate::unsafe_hasher::ThreadUnsafeHasher;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use pdatastructs::{countminsketch::CountMinSketch, hyperloglog::HyperLogLog};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
@@ -26,6 +27,8 @@ use std::hash::{Hash, Hasher};
 use std::iter::repeat_with;
 use std::slice;
 use std::sync::Mutex;
+
+type CMS = CountMinSketch<Edge, u8, BuildHasherDefault<ThreadUnsafeHasher>>;
 
 pub(crate) type Vertex = u32;
 
@@ -119,6 +122,8 @@ type EdgeMap = HashMap<Edge, EdgeStats, BuildHasherDefault<ThreadUnsafeHasher>>;
 pub(crate) fn collect_edges(
     train: &SvmScanner,
     featurizer: &Featurizer,
+    cms: &CMS,
+    threshold_k: u8,
 ) -> (Vec<Edge>, Vec<usize>, GraphStats) {
     let nthreads = train.nthreads();
     let ref writers: Vec<Mutex<EdgeMap>> = repeat_with(|| {
@@ -132,7 +137,16 @@ pub(crate) fn collect_edges(
 
     {
         train.for_each(
-            || EdgeCollector::new(featurizer, writers, shared_stats, nthreads),
+            || {
+                EdgeCollector::new(
+                    featurizer,
+                    cms,
+                    writers,
+                    shared_stats,
+                    nthreads,
+                    threshold_k,
+                )
+            },
             EdgeCollector::consume_line,
             EdgeCollector::finish,
         );
@@ -193,6 +207,8 @@ pub(crate) fn collect_edges(
 
 struct EdgeCollector<'a> {
     featurizer: &'a Featurizer,
+    cms: &'a CMS,
+    threshold_k: u8,
     writers: &'a Vec<Mutex<EdgeMap>>,
     locals: Vec<EdgeMap>,
     // which writers that are we ready to sync to
@@ -212,12 +228,15 @@ struct EdgeCollector<'a> {
 impl<'a> EdgeCollector<'a> {
     fn new<'b>(
         featurizer: &'b Featurizer,
+        cms: &'b CMS,
         writers: &'b Vec<Mutex<EdgeMap>>,
         shared_stats: &'b Mutex<GraphStats>,
         nthreads: usize,
+        threshold_k: u8,
     ) -> EdgeCollector<'b> {
         EdgeCollector {
             featurizer,
+            cms,
             writers,
             locals: vec![Default::default(); writers.len()],
             is_ready: vec![false; nthreads],
@@ -225,6 +244,7 @@ impl<'a> EdgeCollector<'a> {
             repeats: vec![false; featurizer.nsparse()],
             stats: Default::default(),
             shared_stats,
+            threshold_k,
         }
     }
 
@@ -245,7 +265,11 @@ impl<'a> EdgeCollector<'a> {
 
         self.indices.sort_unstable();
         for (i, j) in self.indices.iter().copied().tuple_combinations() {
-            Self::save_local(&mut self.locals, Edge::new(i, j));
+            let e = Edge::new(i, j);
+            if self.cms.query_point(&e) >= self.threshold_k {
+                continue;
+            }
+            Self::save_local(&mut self.locals, e);
         }
 
         let nnz = self.indices.len();
@@ -322,4 +346,140 @@ impl<'a> EdgeCollector<'a> {
         let mut stats = self.shared_stats.lock().unwrap();
         stats.merge(&self.stats);
     }
+}
+
+struct EdgeVisitor<'a, R> {
+    featurizer: &'a Featurizer,
+    indices: Vec<Vertex>,
+    repeats: Vec<bool>,
+    reduced: R,
+}
+
+impl<'a, R> EdgeVisitor<'a, R> {
+    fn new<'b>(featurizer: &'b Featurizer, r: R) -> EdgeVisitor<'b, R> {
+        EdgeVisitor::<'b, R> {
+            featurizer,
+            indices: Vec::with_capacity(featurizer.nsparse()),
+            repeats: vec![false; featurizer.nsparse()],
+            reduced: r,
+        }
+    }
+
+    fn consume_line<'b, F>(&mut self, word_iter: DelimIter<'b>, reduce: F)
+    where
+        F: Fn(&mut R, Edge),
+    {
+        for (i, word) in word_iter.skip(1).enumerate() {
+            let h = match self.featurizer.sparse(i, word) {
+                Some(h) => h,
+                None => continue,
+            };
+            if self.repeats[h as usize] {
+                continue;
+            }
+            self.repeats[h as usize] = true;
+            self.indices.push(h as Vertex);
+        }
+
+        self.indices.sort_unstable();
+        for (i, j) in self.indices.iter().copied().tuple_combinations() {
+            reduce(&mut self.reduced, Edge::new(i, j));
+        }
+
+        for &idx in &self.indices {
+            self.repeats[idx as usize] = false;
+        }
+        self.indices.clear();
+    }
+
+    fn merge<F>(mut self, other: Self, merge: F) -> Self
+    where
+        F: Fn(&mut R, R),
+    {
+        merge(&mut self.reduced, other.reduced);
+        self
+    }
+}
+
+struct CountAndHLL {
+    count: usize,
+    hll: HyperLogLog<Edge, BuildHasherDefault<ThreadUnsafeHasher>>,
+}
+
+/// returns total edge count and unique edge count
+pub(crate) fn estimate_edges(train: &SvmScanner, featurizer: &Featurizer) -> (usize, usize) {
+    let candh = {
+        train
+            .fold_reduce(
+                || {
+                    EdgeVisitor::<CountAndHLL>::new(
+                        featurizer,
+                        CountAndHLL {
+                            count: 0,
+                            hll: HyperLogLog::<_, _>::with_hash(
+                                18,
+                                BuildHasherDefault::<ThreadUnsafeHasher>::default(),
+                            ),
+                        },
+                    )
+                },
+                |mut x, line| {
+                    x.consume_line(line, |candh, edge| {
+                        candh.count += 1;
+                        candh.hll.add(&edge);
+                    });
+                    x
+                },
+                |x, y| {
+                    x.merge(y, |l: &mut CountAndHLL, r: CountAndHLL| {
+                        l.count += r.count;
+                        l.hll.merge(&r.hll);
+                    })
+                },
+            )
+            .reduced
+    };
+    (candh.count, candh.hll.count())
+}
+
+/// creates bloom filter
+pub(crate) fn create_cms(
+    train: &SvmScanner,
+    featurizer: &Featurizer,
+    threshold_k: u8,
+    n_edges: usize,
+    n_unique_edges: usize,
+) -> CMS {
+    let eps = 0.01;
+    let delta = 0.01;
+    let cms = {
+        train
+            .fold_reduce(
+                || {
+                    EdgeVisitor::new(
+                        featurizer,
+                        CountMinSketch::<Edge, u8, _>::with_point_query_properties_and_hasher(
+                            eps,
+                            delta,
+                            BuildHasherDefault::<ThreadUnsafeHasher>::default(),
+                        ),
+                    )
+                },
+                |mut x, line| {
+                    x.consume_line(line, |cms, edge| {
+                        if cms.query_point(&edge) < threshold_k {
+                            cms.add(&edge);
+                        }
+                    });
+                    x
+                },
+                |x, y| {
+                    x.merge(y, |l: &mut CountMinSketch<_, _, _>, r| {
+                        l.merge(&r);
+                    })
+                },
+            )
+            .reduced
+    };
+    cms
 }

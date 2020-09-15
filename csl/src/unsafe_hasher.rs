@@ -15,6 +15,7 @@ pub struct ThreadUnsafeHasher {
 
 /// See module documentation. Callers must pinky-promise to not abuse this.
 unsafe impl Send for ThreadUnsafeHasher {}
+unsafe impl Sync for ThreadUnsafeHasher {}
 
 impl Hasher for ThreadUnsafeHasher {
     fn finish(&self) -> u64 {

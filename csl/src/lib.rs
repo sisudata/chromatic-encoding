@@ -86,8 +86,32 @@ pub fn read_featurize_write(
         // i1 and i2 is just the concatenation of their bits.
         //
         // For logging purposes, also maximum number of active features among all lines.
+
         let start = Instant::now();
-        let (mut edges_vec, mut edge_freqs, edge_stats) = edges::collect_edges(&train, &featurizer);
+        let (n_edges, n_unique_edges) = edges::estimate_edges(&train, &featurizer);
+        println!("total num edges {}", n_edges);
+        println!("estimated unique edges count {}", n_unique_edges);
+        println!(
+            "edge estimation {:.0?}",
+            Instant::now().duration_since(start)
+        );
+
+        let start = Instant::now();
+        let cms = edges::create_cms(
+            &train,
+            &featurizer,
+            threshold_k.try_into().unwrap(),
+            n_edges,
+            n_unique_edges,
+        ); // cms with max value threshold_k
+        println!(
+            "bloom construction {:.0?}",
+            Instant::now().duration_since(start)
+        );
+
+        let start = Instant::now();
+        let (mut edges_vec, mut edge_freqs, edge_stats) =
+            edges::collect_edges(&train, &featurizer, &cms, threshold_k.try_into().unwrap());
         println!(
             "edge collection {:.0?}",
             Instant::now().duration_since(start)

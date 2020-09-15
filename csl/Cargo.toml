@@ -15,6 +15,7 @@ ordered-float = "1.0"
 rand = "0.7"
 hashbrown = "0.7"
 byte-slice-cast = "0.3"
+pdatastructs = { git = "https://github.com/vlad17/pdatastructs.rs", rev = "fd2667d0cc13" }
 
 [profile.release]
 debug = true # Include debug symbols.
