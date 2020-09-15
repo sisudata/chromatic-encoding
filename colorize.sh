@@ -18,14 +18,13 @@ total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/unbiased-svms/"
 datasets="url kdda kddb"
 
-cutoff=Double
-echo "compressing $datasets across bits $(echo $bits) cutoff $cutoff"
+echo "compressing $datasets across bits $(echo $bits)"
 
 for dataset in $datasets ; do
 
 for i in $bits ; do 
     budget=$((1 << $i))
-flags="--k 10 --cutoff-style $cutoff --glauber-samples 10000000 "
+flags="--k 10 --glauber-samples 10000000 "
 
 for compress_suffix in "FrequencyTruncation ft" "SubmodularExpansion sm"; do 
 compress=$(echo $compress_suffix | cut -d" " -f1)
