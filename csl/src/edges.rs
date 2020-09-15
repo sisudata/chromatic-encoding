@@ -41,13 +41,15 @@ pub(crate) struct Edge {
 #[derive(Default, Clone)]
 pub(crate) struct GraphStats {
     nlines: usize,
+    nskip: usize,
     max_nnz: usize,
     sum_nnz: usize,
     sum_edges: u128,
 }
 
 impl GraphStats {
-    fn update(&mut self, nnz: usize) {
+    fn update(&mut self, nnz: usize, nskip: usize) {
+        self.nskip += nskip;
         self.nlines += 1;
         self.max_nnz = self.max_nnz.max(nnz);
         self.sum_nnz += nnz;
@@ -59,11 +61,13 @@ impl GraphStats {
         self.max_nnz = self.max_nnz.max(other.max_nnz);
         self.sum_nnz += other.sum_nnz;
         self.sum_edges += other.sum_edges;
+	self.nskip += other.nskip;
     }
 
     pub(crate) fn print(&self) {
         let avg_nnz = self.sum_nnz / self.nlines;
         let avg_edges = self.sum_edges / self.nlines as u128;
+	println!("num edges filtered by bloom {}", self.nskip);
         println!("avg nnz per row {}", avg_nnz);
         println!("max nnz per row {}", self.max_nnz);
         println!("avg edges per row {}", avg_edges);
@@ -264,16 +268,18 @@ impl<'a> EdgeCollector<'a> {
         }
 
         self.indices.sort_unstable();
+	let mut nskipped = 0usize;
         for (i, j) in self.indices.iter().copied().tuple_combinations() {
             let e = Edge::new(i, j);
-            if self.cms.query_point(&e) >= self.threshold_k {
+            if self.cms.query_point(&e) < self.threshold_k {
+	       nskipped += 1;
                 continue;
             }
             Self::save_local(&mut self.locals, e);
         }
 
         let nnz = self.indices.len();
-        self.stats.update(nnz);
+        self.stats.update(nnz, nskipped);
 
         for &idx in &self.indices {
             self.repeats[idx as usize] = false;
@@ -450,7 +456,8 @@ pub(crate) fn create_cms(
     n_edges: usize,
     n_unique_edges: usize,
 ) -> CMS {
-    let eps = 0.01;
+    let effective_max_edges = (n_unique_edges * threshold_k as usize).max(n_edges);
+    let eps = 1.0 / n_edges as f64 / 10.;
     let delta = 0.01;
     let cms = {
         train

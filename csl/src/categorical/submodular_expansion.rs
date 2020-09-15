@@ -284,7 +284,8 @@ impl MutualInformation {
         ncolors: usize,
     ) -> (Self, Vec<BTreeSet<usize>>) {
         assert!(features.len() == colors.len());
-        assert!(colors.iter().max().unwrap() + 1 == ncolors as u32);
+        assert!(colors.iter().max().unwrap() + 1 == ncolors as u32,
+		"max color {} ncolors {}", colors.iter().max().unwrap(), ncolors);
 
         if cfg!(debug_assertions) {
             let mut color_sketches = vec![Sketch::default(); ncolors];

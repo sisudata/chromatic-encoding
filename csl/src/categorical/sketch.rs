@@ -130,13 +130,16 @@ where
 
 /// Misc utility function for printing quantiles.
 pub(crate) fn pretty_stats<T: PartialOrd + Display>(mut v: Vec<T>) -> String {
+    if v.is_empty() {
+        return String::from("empty");
+    }
     v.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
     [
         0000, 25000, 50000, 75000, 90000, 95000, 99000, 99900, 99990, 99999, 100000,
     ]
     .iter()
     .copied()
-    .map(|p| format!("{}%: {}", p as f64 / 1000., v[(p * (v.len() - 1) / 100000)]))
+    .map(|p| format!("{}%: {}", p as f64 / 1000., v[(p * (v.len().saturating_sub(1)) / 100000)]))
     .collect::<Vec<String>>()
     .join(" ")
 }

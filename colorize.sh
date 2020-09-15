@@ -16,7 +16,7 @@ nthreads=47
 num_concurrent_datasets=2
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/unbiased-svms/"
-datasets="url kdda kddb"
+datasets="url kdda"
 
 echo "compressing $datasets across bits $(echo $bits)"
 
@@ -35,7 +35,7 @@ echo \
   --valid ./svms-data/${dataset}.test.svm $flags
 done
 done
-done | shuf | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1  ./csl/target/release/csl >svms-data/log-colorize-${cutoff}.txt
+done | shuf | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1  ./csl/target/release/csl >svms-data/log-colorize.txt
 
 # echo "parallel taring $dataset into ./svms-data/${dataset}.tar.zst"
 

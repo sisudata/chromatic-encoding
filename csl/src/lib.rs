@@ -145,7 +145,7 @@ pub fn read_featurize_write(
         let mut graph = supergraph.filter(threshold_k);
         graph.internal_sort();
         println!(
-            "adjacency list construction {:.0?}",
+            "(filtered) adjacency list construction {:.0?}",
             Instant::now().duration_since(start)
         );
 
