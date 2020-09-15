@@ -117,7 +117,9 @@ pub fn read_featurize_write(
         }
 
         let start = Instant::now();
-        let mut graph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
+        let supergraph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
+        let mut graph = supergraph.filter(threshold_k);
+        graph.internal_sort();
         println!(
             "adjacency list construction {:.0?}",
             Instant::now().duration_since(start)
@@ -141,7 +143,6 @@ pub fn read_featurize_write(
 
         let start = Instant::now();
         let (ncolors, color) = if let Some(nsamples) = glauber_samples {
-            graph.internal_sort();
             let budget = budget as u32;
             glauber_color(&graph, budget, threshold_k, nsamples)
         } else {
@@ -512,13 +513,8 @@ fn glauber_color(
     threshold_k: usize,
     nsamples: usize,
 ) -> (u32, Vec<u32>) {
-    let orig_budget = budget;
-    let supergraph = graph;
-    let mut graph = supergraph.filter(threshold_k);
-    graph.internal_sort();
-
     let ref mask = vec![true; graph.nvertices()];
-    let (greedy_ncolors, mut colors) = greedy_color_masked(&graph, mask);
+    let (greedy_ncolors, colors) = greedy_color_masked(&graph, mask);
     assert!(
         greedy_ncolors <= budget,
         "greedy ncolors {} remaining budget {}",
