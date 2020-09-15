@@ -33,15 +33,6 @@ use svm_scanner::SvmScanner;
 
 pub type Compression = categorical::Compression;
 
-pub enum CutoffStyle {
-    Zero,   // All-Glauber coloring
-    Double, // Double avg degree for colors (Erdos-renyi model)
-    Earliest,
-    Ballpark,  // cutoff when 2 * maxdeg == prefix length
-    Optimized, // Solve full N^k problem
-    Full,      // Use all largest-first
-}
-
 pub fn read_featurize_write(
     train: Vec<PathBuf>,
     valid: Vec<PathBuf>,
@@ -51,10 +42,8 @@ pub fn read_featurize_write(
     budget: usize,
     dump_graph: Option<PathBuf>,
     freq_cutoff: usize,
-    split_rate: usize,
     threshold_k: usize,
     glauber_samples: Option<usize>,
-    cutoff_style: CutoffStyle,
 ) -> Result<(), Box<dyn Error>> {
     let first_train_path = train[0].clone();
 
@@ -154,7 +143,7 @@ pub fn read_featurize_write(
         let (ncolors, color) = if let Some(nsamples) = glauber_samples {
             graph.internal_sort();
             let budget = budget as u32;
-            glauber_color(&graph, budget, cutoff_style, threshold_k, Some(nsamples))
+            glauber_color(&graph, budget, threshold_k, nsamples)
         } else {
             greedy_color(&graph)
         };
@@ -180,7 +169,7 @@ pub fn read_featurize_write(
         &featurizer,
         ncolors as usize,
         color,
-        split_rate,
+        1,
     );
     println!(
         "categorical encoding {:.0?}",
@@ -520,101 +509,22 @@ fn color_collision_count(
 fn glauber_color(
     graph: &AdjacencyList,
     budget: u32,
-    cutoff_style: CutoffStyle,
     threshold_k: usize,
-    nsamples: Option<usize>,
+    nsamples: usize,
 ) -> (u32, Vec<u32>) {
     let orig_budget = budget;
     let supergraph = graph;
     let mut graph = supergraph.filter(threshold_k);
     graph.internal_sort();
 
-    let lf = graph.largest_first();
-    let lf_turing: Vec<_> = supergraph
-        .turing_estimate(1, &lf.iter().map(|(v, _)| *v).collect())
-        .into_iter()
-        .zip(lf.into_iter())
-        .map(|(nk, (v, deg))| (v, deg, nk))
-        .collect();
-    let inf = lf_turing[0].2 + 1;
-    let optimized_cutoff: usize = lf_turing
-        .iter()
-        .enumerate()
-        .min_by_key(|(i, (_, deg, nk))| {
-            let budget = budget as usize - *i;
-            let deg = *deg as usize;
-            if budget <= deg * 2 {
-                return inf;
-            }
-            *nk / (budget - deg * 2)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    let earliest_cutoff: usize = lf_turing
-        .iter()
-        .map(|(_, deg, _)| *deg as usize)
-        .enumerate()
-        .position(|(i, deg)| {
-            deg * 2
-                < budget
-                    .saturating_sub(i.try_into().unwrap())
-                    .try_into()
-                    .unwrap()
-        })
-        .unwrap_or(lf_turing.len());
-    let ballpark_cutoff: usize = lf_turing
-        .iter()
-        .map(|(_, deg, _)| *deg as usize)
-        .enumerate()
-        .position(|(i, deg)| deg * 2 < i)
-        .unwrap_or(lf_turing.len());
-
-    println!("optimized cutoff after vertex {}", optimized_cutoff);
-    println!("viable budget is {}", budget);
-    println!("ballpark cutoff {}", ballpark_cutoff);
-    println!("earliest cutoff {}", earliest_cutoff);
-
-    let cutoff = match cutoff_style {
-        CutoffStyle::Zero => 0,
-        CutoffStyle::Double => 0,
-        CutoffStyle::Earliest => earliest_cutoff,
-        CutoffStyle::Ballpark => ballpark_cutoff,
-        CutoffStyle::Optimized => optimized_cutoff,
-        CutoffStyle::Full => lf_turing.len(),
-    };
-
-    let nv = graph.nvertices() as u32;
-    let mut colors = random_improper_coloring(nv, nv.min(budget));
-    let mut budget = budget;
-    for (v, _, _) in &lf_turing[0..cutoff] {
-        if budget == 0 {
-            break;
-        }
-        budget -= 1;
-        colors[*v as usize] = budget;
-    }
-
-    if budget == 0 {
-        return (orig_budget, colors);
-    }
-
-    let ref mut mask = vec![true; graph.nvertices()];
-    for (v, _, _) in &lf_turing[0..cutoff] {
-        mask[*v as usize] = false;
-    }
-    let (greedy_ncolors, greedy_colors) = greedy_color_masked(&graph, mask);
-    println!(
+    let ref mask = vec![true; graph.nvertices()];
+    let (greedy_ncolors, mut colors) = greedy_color_masked(&graph, mask);
+    assert!(
+        greedy_ncolors <= budget,
         "greedy ncolors {} remaining budget {}",
-        greedy_ncolors, budget
+        greedy_ncolors,
+        budget
     );
-    if greedy_ncolors > budget {
-        return (orig_budget, colors);
-    }
-    for v in 0..graph.nvertices() {
-        if mask[v] {
-            colors[v] = greedy_colors[v];
-        }
-    }
 
     // https://www.math.cmu.edu/~af1p/Texfiles/colorbdd.pdf
     // https://www.math.cmu.edu/~af1p/Teaching/MCC17/Papers/colorJ.pdf
@@ -634,16 +544,16 @@ fn glauber_color(
         "chose parallelism {} (recommendation {}) for {}-coloring (greedy {})",
         nthreads, max_parallel, budget, greedy_ncolors
     );
+    println!(
+        "nsamples {} (recommendation {})",
+        nsamples,
+        max_degree * subgraph_sz
+    );
 
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    let samples = nsamples.unwrap_or(max_degree * subgraph_sz);
-    let (ncolors, budget) = if let CutoffStyle::Double = cutoff_style {
-        let ncolors = greedy_ncolors.max((avg_degree * 2.) as u32);
-        (ncolors, ncolors)
-    } else {
-        (orig_budget, budget)
-    };
+    let samples = nsamples;
+    let ncolors = greedy_ncolors;
 
     let colors = colors
         .into_iter()

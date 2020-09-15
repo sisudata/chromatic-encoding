@@ -25,20 +25,6 @@ enum Compression {
 
 }
 
-arg_enum! {
-
-#[derive(Debug)]
-enum CutoffStyle {
-    Zero,
-    Double,
-    Earliest,
-    Ballpark,
-    Optimized,
-    Full
-}
-
-}
-
 /// Reads a set of training and validation set files from disk. Each
 /// file is treated as a u8 byte block. The only special characters
 /// are '\n', ':', and ' '. The first word on each line should be ASCII
@@ -121,11 +107,6 @@ struct Opt {
     #[structopt(long, possible_values = &Compression::variants(), case_insensitive = true)]
     compress: Compression,
 
-    /// Designate the compression methodology after performing coloring, which
-    /// can be either target encoding or submodular expansion.
-    #[structopt(long, possible_values = &CutoffStyle::variants(), case_insensitive = true)]
-    cutoff_style: CutoffStyle,
-
     /// The column budget controls what the maximum number of output columns
     /// will be. For target encoding, this can be relatively small, there's no
     /// sense in it being larger than the chromatic number of the co-ocurrence
@@ -139,26 +120,17 @@ struct Opt {
     #[structopt(long, default_value = "0")]
     freq_cutoff: usize,
 
-    /// Use 2**(-split_rate) proportion of the dataset to estimate
-    /// conditional probabilities.
-    #[structopt(long, default_value = "1")]
-    split_rate: usize,
-
     /// If specified, dump the graph in text format (edge on each line,
     /// space between vertices) to this file.
     #[structopt(long)]
     dump_graph: Option<PathBuf>,
 
-    /// Number of samples to use for glauber coloring.
+    /// Number of samples to use for glauber coloring (if disabled, use greedy).
     #[structopt(long)]
     glauber_samples: Option<usize>,
 
-    /// If --print-new-edges is specified, then uses this value of k to show
-    /// diagnostics about color collisions for the filtered, thresholded graph
-    /// given by threshold k, for varying colors as specified by
-    /// the argument diagnostic_colors
-    ///
-    /// If this is set to 0 (the default), then these diagnostics are not printed.
+    /// Use edges that appeared at least this many times before performing
+    /// graph-based featurization.
     #[structopt(long, default_value = "0")]
     k: usize,
 }
@@ -198,15 +170,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Compression::Unbiased => (csl::Compression::Unbiased, format!("{}un.svm", opt.budget)),
     };
 
-    let cutoff_style = match opt.cutoff_style {
-        CutoffStyle::Zero => csl::CutoffStyle::Zero,
-        CutoffStyle::Double => csl::CutoffStyle::Double,
-        CutoffStyle::Earliest => csl::CutoffStyle::Earliest,
-        CutoffStyle::Ballpark => csl::CutoffStyle::Ballpark,
-        CutoffStyle::Optimized => csl::CutoffStyle::Optimized,
-        CutoffStyle::Full => csl::CutoffStyle::Full,
-    };
-
     csl::read_featurize_write(
         opt.train,
         opt.valid,
@@ -216,10 +179,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         opt.budget,
         opt.dump_graph,
         opt.freq_cutoff,
-        opt.split_rate,
         opt.k,
         opt.glauber_samples,
-        cutoff_style,
     )?;
     Ok(())
 }
