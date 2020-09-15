@@ -120,10 +120,6 @@ pub fn read_featurize_write(
             "edge frequencies {}",
             categorical::sketch::pretty_stats(edge_freqs.clone())
         );
-        println!(
-            "edge diagnostics {:.0?}",
-            Instant::now().duration_since(start)
-        );
         println!("num unique edges {}", edges_vec.len());
         println!("avg degree {}", edges_vec.len() * 2 / featurizer.nsparse());
         edge_stats.print();
@@ -538,11 +534,11 @@ fn glauber_color(
     nsamples: usize,
 ) -> (u32, Vec<u32>) {
     let ref mask = vec![true; graph.nvertices()];
-    let (greedy_ncolors, colors) = greedy_color_masked(&graph, mask);
+    let (ncolors, colors) = greedy_color_masked(&graph, mask);
     assert!(
-        greedy_ncolors <= budget,
+        ncolors <= budget,
         "greedy ncolors {} remaining budget {}",
-        greedy_ncolors,
+        ncolors,
         budget
     );
 
@@ -561,8 +557,8 @@ fn glauber_color(
     let nthreads = (rayon::current_num_threads() as usize).min(max_parallel.max(16));
 
     println!(
-        "chose parallelism {} (recommendation {}) for {}-coloring (greedy {})",
-        nthreads, max_parallel, budget, greedy_ncolors
+        "chose parallelism {} (recommendation {}) for {}-coloring (from greedy)",
+        nthreads, max_parallel, ncolors
     );
     println!(
         "nsamples {} (recommendation {})",
@@ -573,7 +569,6 @@ fn glauber_color(
     use std::sync::atomic::{AtomicU32, Ordering};
 
     let samples = nsamples;
-    let ncolors = greedy_ncolors;
 
     let colors = colors
         .into_iter()
@@ -585,14 +580,14 @@ fn glauber_color(
         .map(|i| {
             let samples = (samples / nthreads).max(1);
             let mut rng = StdRng::seed_from_u64((1234 + i) as u64); // no idea how to do this better in rust
-            let mut adjacent_color: Vec<bool> = vec![false; budget as usize];
+            let mut adjacent_color: Vec<bool> = vec![false; ncolors as usize];
             let mut neighbor_colors: Vec<u32> = Vec::with_capacity(max_degree as usize);
             let mut conflicts = 0;
 
             for _ in 0..samples {
                 // loop invariant is that none of adjacent_color elements are true
 
-                let reservation = (budget + 1) as u32;
+                let reservation = (ncolors + 1) as u32;
 
                 loop {
                     let v: u32 = rng.gen_range(0, graph.nvertices() as u32);
@@ -643,7 +638,7 @@ fn glauber_color(
                         .enumerate()
                         .filter(|(_, x)| !x)
                         .map(|(i, _)| i)
-                        .nth(rng.gen_range(0, (budget as usize) - nadjacent_colors))
+                        .nth(rng.gen_range(0, (ncolors as usize) - nadjacent_colors))
                         .expect("nth");
 
                     graph
@@ -666,7 +661,7 @@ fn glauber_color(
 
     println!(
         "sampled {}-coloring with {} MCMC steps, {:.1}% overhead on {} threads",
-        budget,
+        ncolors,
         samples,
         100.0 * conflicts as f64 / samples as f64,
         nthreads

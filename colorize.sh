@@ -11,9 +11,9 @@
 
 set -euo pipefail
     
-bits="10 12 14 16 18"
-nthreads=47
-num_concurrent_datasets=2
+bits=$(seq 10 18)
+nthreads=95
+num_concurrent_datasets=1
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/unbiased-svms/"
 datasets="url kdda"

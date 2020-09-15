@@ -451,14 +451,12 @@ pub(crate) fn estimate_edges(train: &SvmScanner, featurizer: &Featurizer) -> (us
 }
 
 impl RollingBloom {
-    fn new(k: usize, expected_num_unique: usize) -> Self {
+    fn new(k: usize, bits: usize, hashes: usize) -> Self {
         let mut v = Vec::new();
-        let fpr = 0.10;
-        let decay = 2f64;
-        for i in 0i32..(k as i32) {
-            v.push(BloomFilter::with_properties_and_hash(
-                (expected_num_unique as f64 * (decay.powi(-i))) as usize,
-                0.10,
+        for i in 0..k {
+            v.push(BloomFilter::with_params_and_hash(
+		bits,
+        	hashes,
                 BuildHasherDefault::<ThreadUnsafeHasher>::default(),
             ))
         }
@@ -493,14 +491,18 @@ pub(crate) fn create_cms(
     n_edges: usize,
     n_unique_edges: usize,
 ) -> RollingBloom {
-    let delta = 0.05;
+    let max_per_thread = 1. * 1024. * 1024. * 1024.; // 1G max per thread
+    let max_bits_per_bloom = (max_per_thread * 8. / (threshold_k as f64)) as usize;
+    println!("at 1G max per thread, {} rolling blooms", threshold_k);
+    let num_hashes = ((max_bits_per_bloom as f64 * (2f64).ln() / n_unique_edges as f64) as usize).max(1);
+    println!("{}MB per bloom, {} hashes", max_bits_per_bloom / 1024 / 1024, num_hashes);
     let cms = {
         train
             .fold_reduce(
                 || {
                     EdgeVisitor::new(
                         featurizer,
-                        RollingBloom::new(threshold_k as usize, n_unique_edges),
+                        RollingBloom::new(threshold_k as usize, max_bits_per_bloom, num_hashes),
                     )
                 },
                 |mut x, line| {
