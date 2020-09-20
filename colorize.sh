@@ -12,11 +12,11 @@
 set -euo pipefail
     
 bits=$(seq 10 18)
-nthreads=95
+nthreads=32
 num_concurrent_datasets=1
 total_parallelism=$(( $nthreads * $num_concurrent_datasets))
 dst_s3="s3://sisu-datasets/glauber/"
-datasets="url kdda"
+datasets="url kdda kddb kdd12"
 
 echo "compressing $datasets across bits $(echo $bits)"
 
@@ -49,10 +49,13 @@ aws s3 cp ./svms-data/${dataset}.tar.zst "$dst_s3${dataset}.tar.zst"
 for t in train test ; do for s in sm ft ; do
   cp ./svms-data/${dataset}.${t}.1024${s}.svm ./svms-data/saved${dataset}.${t}.1024${s}.svm
 done ; done
+for s in sm ft ; do 
+cp ./svms-data/${dataset}.train.1024${s}.svm.field_dims.txt ./svms-data/saved${dataset}.train.1024${s}.svm.field_dims.txt
+done
 
-rm ./svms-data/${dataset}.{train,test}.*{sm,ft}.svm \
-   ./svms-data/${dataset}.{train,test}.*{ft,ht,sm}.svm.field_dims.txt
-  
+rm -f ./svms-data/${dataset}.{train,test}.*{sm,ft}.svm \
+      ./svms-data/${dataset}.train.*{ft,sm}.svm.field_dims.txt
+
 done # dataset
 
 budget=1024
@@ -60,7 +63,10 @@ for dataset in $datasets ; do
 for t in train test ; do for s in sm ft ; do
 mv ./svms-data/saved${dataset}.${t}.1024${s}.svm ./svms-data/${dataset}.${t}.1024${s}.svm
 done ; done
-
+t=train
+for s in sm ft ; do
+mv ./svms-data/saved${dataset}.${t}.1024${s}.svm.field_dims.txt ./svms-data/${dataset}.${t}.1024${s}.svm.field_dims.txt
+done ; done
 # echo "target encoding all datasets"
 
 # for dataset in $datasets ; do
@@ -73,7 +79,7 @@ done ; done
 echo "binary-encoding all datasets"
 
 for dataset in $datasets ; do
-for suffix in ft sm te ; do
+for suffix in ft sm ; do
 suffix=".${budget}${suffix}"
 
 echo ./svms-data/${dataset}.train${suffix}.svm
@@ -82,7 +88,7 @@ echo ./svms-data/${dataset}.test${suffix}.svm
 done
 echo ./svms-data/${dataset}.train.svm
 echo ./svms-data/${dataset}.test.svm
-done | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/svm2bins >/dev/null
+done  | RAYON_NUM_THREADS=$nthreads xargs -P $num_concurrent_datasets -L 1 ./csl/target/release/svm2bins >/dev/null
 
 echo "pre-computing binary ht for all datasets"
 
@@ -106,5 +112,5 @@ aws s3 cp ./svms-data/binary.tar.zst "${dst_s3}binary.tar.zst"
 rm \
   ./svms-data/{url,kdda,kddb,kdd12}.{train,test}.{data,indices,indptr,y}.bin \
   ./svms-data/{url,kdda,kddb,kdd12}.{train,test}.1024{sm,ft,ht}.{data,indices,indptr,y}.bin \
-  ./svms-data/{url,kdda,kddb,kdd12}.{train,test}.1024{sm,ft,ht}.svm \
-  ./svms-data/{url,kdda,kddb,kdd12}.{train,test}.1024{sm,ft,ht}.svm.field_dims.txt
+  ./svms-data/{url,kdda,kddb,kdd12}.{train,test}.1024{sm,ft}.svm \
+  ./svms-data/{url,kdda,kddb,kdd12}.train.1024{sm,ft}.svm.field_dims.txt
