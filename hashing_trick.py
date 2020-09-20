@@ -43,6 +43,6 @@ dtypes = [np.float64, np.uint32, np.uint64, np.float64]
 arrays = [X.data, X.indices, X.indptr, y]
 suffixes = ['data', 'indices', 'indptr', 'y']
 for dtype, array, suffix in zip(dtypes, arrays, suffixes):
-    outfn = outprefix + '.ht{}.{}.bin'.format(budget, suffix)
+    outfn = outprefix + '.{}ht.{}.bin'.format(budget, suffix)
     array = array.astype(dtype)
     array.tofile(outfn)
