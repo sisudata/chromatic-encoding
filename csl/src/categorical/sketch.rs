@@ -139,7 +139,13 @@ pub(crate) fn pretty_stats<T: PartialOrd + Display>(mut v: Vec<T>) -> String {
     ]
     .iter()
     .copied()
-    .map(|p| format!("{}%: {}", p as f64 / 1000., v[(p * (v.len().saturating_sub(1)) / 100000)]))
+    .map(|p| {
+        format!(
+            "{}%: {}",
+            p as f64 / 1000.,
+            v[(p * (v.len().saturating_sub(1)) / 100000)]
+        )
+    })
     .collect::<Vec<String>>()
     .join(" ")
 }

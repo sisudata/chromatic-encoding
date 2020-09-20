@@ -455,8 +455,8 @@ impl RollingBloom {
         let mut v = Vec::new();
         for i in 0..k {
             v.push(BloomFilter::with_params_and_hash(
-		bits,
-        	hashes,
+                bits,
+                hashes,
                 BuildHasherDefault::<ThreadUnsafeHasher>::default(),
             ))
         }
@@ -491,11 +491,20 @@ pub(crate) fn create_cms(
     n_edges: usize,
     n_unique_edges: usize,
 ) -> RollingBloom {
-    let max_per_thread = 1. * 1024. * 1024. * 1024.; // 1G max per thread
+    let max_per_thread = 1. * 1024. * 1024. * 1024.;
     let max_bits_per_bloom = (max_per_thread * 8. / (threshold_k as f64)) as usize;
-    println!("at 1G max per thread, {} rolling blooms", threshold_k);
-    let num_hashes = ((max_bits_per_bloom as f64 * (2f64).ln() / n_unique_edges as f64) as usize).max(1);
-    println!("{}MB per bloom, {} hashes", max_bits_per_bloom / 1024 / 1024, num_hashes);
+    println!(
+        "at {}G max per thread, {} rolling blooms",
+        max_per_thread / 1024. / 1024. / 1024.,
+        threshold_k
+    );
+    let num_hashes =
+        ((max_bits_per_bloom as f64 * (2f64).ln() / n_unique_edges as f64) as usize).max(1);
+    println!(
+        "{}MB per bloom, {} hashes",
+        max_bits_per_bloom / 1024 / 1024,
+        num_hashes
+    );
     let cms = {
         train
             .fold_reduce(

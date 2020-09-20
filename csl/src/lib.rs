@@ -139,6 +139,7 @@ pub fn read_featurize_write(
         let start = Instant::now();
         let supergraph = AdjacencyList::new(featurizer.nsparse(), edges_vec, edge_freqs);
         let mut graph = supergraph.filter(threshold_k);
+        std::mem::drop(supergraph);
         graph.internal_sort();
         println!(
             "(filtered) adjacency list construction {:.0?}",

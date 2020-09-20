@@ -34,7 +34,7 @@ fn print_sparse_logs(featurizer: &Featurizer, budget: usize) {
         featurizer.feature_count(
             budget
                 .saturating_sub(1)
-                .min(featurizer.nsparse())
+                .min(featurizer.nsparse() - 1)
                 .try_into()
                 .unwrap()
         )
