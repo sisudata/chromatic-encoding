@@ -1,17 +1,12 @@
-# Chromatic Learning Materials
+# Chromatic Encoding
 
-Python notebooks require some environment set up, specified below.
+Dimensionality reduction for discrete data encodings.
 
-## Data download
+## Environment Setup
 
-I re-used my old downloading code, so you'll need to run the entire `urls.ipynb` notebook and then the
-`urls-eval.ipynb` notebook before being able to use the main evalutaion notebook, `svms.ipynb`,
-which relies on data downloaded and sorted/split from those two notebooks.
+[Install Rust](https://www.rust-lang.org/tools/install).
 
-## Python Environment Setup for Notebooks
-
-First, install [Anaconda 3](https://www.anaconda.com/distribution/) and add it to your path.
-
+Next, install [Anaconda 3](https://www.anaconda.com/distribution/) and add it to your path.
 
 **To be done when you clone or move this repo**:
 ```
@@ -44,6 +39,21 @@ For GPU machines, you'll need to install a gpu version of pytorch over this env.
 We will also need various tools for parsing/etc:
 
 ```
+sudo apt install -y vowpal-wabbit datamash zstd nodejs npm 
 npm install -g relaxed-json
-sudo apt install -y vowpal-wabbit datamash zstd
 ```
+
+## Usage
+
+All scripts are intended to be run from the repository root (the directory containing this `README.md` file).
+
+All scripts read and write to S3 to cache intermediate data if not available on the local FD, using prefix `S3ROOT` which must be set as an environment variable. `DATASETS` defines which datasets to operate on, and should be a space-delimited string containing words `urltoy url kdda kddb kdd12`. The table below summarizes what each script does.
+
+```
+export S3ROOT="s3://sisu-datasets/ce-build"
+export DATASETS="urltoy url kdda kddb kdd12"
+```
+
+| Script | Description |
+| --- | --- |
+| `bash raw/run.sh` | download raw datasets |
