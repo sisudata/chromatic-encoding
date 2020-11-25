@@ -83,17 +83,17 @@ for dataset in $to_get ; do
     
     bash clean/recode_dataset.sh $dataset
 
-    pushd clean/data
+    pushd clean/data >/dev/null
     all=$(echo ${dataset}.{train,test}{.original,}.svm.* \
         | tr ' ' '\n' \
-        | parallel --will-cite 'zstd {} -o {}.zst && rm {} && echo {}.zst')
+        | parallel --will-cite 'zstd -q {} -o {}.zst && rm {} && echo {}.zst')
     tar cf ${dataset}.tar $all
-    rm $all
+    rm $all clean/data/${dataset}.{train,test}.original.svm
     cache_write ${dataset}.tar
-    popd
+    popd >/dev/null
 done
 
-# echo "$DATASETS" \
-#     | tr ' ' '\n' \
-#     | parallel --will-cite rm "clean/data/{}.{train,test}.original.svm"
+echo "$DATASETS" \
+    | tr ' ' '\n' \
+    | parallel --will-cite "
 

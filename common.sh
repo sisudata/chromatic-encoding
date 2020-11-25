@@ -28,6 +28,7 @@ function cache_read {
 export -f cache_read
 
 function cache_write {
+    local base=$(basename "$1")
     local s3file="$S3ROOT/$DIRPREFIX/$base"
     aws s3 cp "$1" "$s3file"
 }
