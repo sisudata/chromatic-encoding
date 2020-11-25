@@ -39,8 +39,10 @@ For GPU machines, you'll need to install a gpu version of pytorch over this env.
 We will also need various tools for parsing/etc:
 
 ```
-sudo apt install -y vowpal-wabbit datamash zstd nodejs npm 
+sudo apt install -y vowpal-wabbit datamash zstd nodejs npm moreutils gawk
 npm install -g relaxed-json
+# TODO gnu parallel -> rust parallel
+# https://github.com/mmstick/parallel
 ```
 
 ## Usage
@@ -57,3 +59,4 @@ export DATASETS="urltoy url kdda kddb kdd12"
 | Script | Description |
 | --- | --- |
 | `bash raw/run.sh` | download raw datasets |
+| `bash clean/run.sh` | clean datasets |

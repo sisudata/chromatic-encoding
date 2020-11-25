@@ -28,11 +28,16 @@ function cache_read {
 export -f cache_read
 
 function cache_write {
-    local base=$(basename "$1")
-    local fsfile="$DIRPREFIX/data/$base"
     local s3file="$S3ROOT/$DIRPREFIX/$base"
-    mv "$1" $fsfile
-    aws s3 cp "$fsfile" "$s3file"
+    aws s3 cp "$1" "$s3file"
 }
 
 export -f cache_write
+
+
+# https://stackoverflow.com/a/41962458/1779853
+function seeded_random {
+  seed="$1"
+  openssl enc -aes-256-ctr -pass pass:"$seed" -nosalt \
+    </dev/zero 2>/dev/null
+}

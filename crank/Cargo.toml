@@ -1,0 +1,17 @@
+[package]
+name = "crank"
+version = "0.1.0"
+authors = ["Vladimir Feinberg <vladimir.feinberg@gmail.com>"]
+edition = "2018"
+
+[[example]]
+name = "recode"
+path = "examples/recode.rs"
+
+[dependencies]
+rayon = "1.3"
+itertools = "0.9"
+bstr = "0.2"
+
+[dev-dependencies]
+structopt = "0.3"
