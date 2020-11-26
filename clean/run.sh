@@ -49,7 +49,7 @@ source common.sh
 
 to_get=""
 for dataset in $DATASETS ; do
-    if ! cache_read ${dataset}.zst ; then
+    if ! cache_read ${dataset}.tar ; then
         to_get="${to_get}${dataset} "
     fi
 done
@@ -92,8 +92,3 @@ for dataset in $to_get ; do
     cache_write ${dataset}.tar
     popd >/dev/null
 done
-
-echo "$DATASETS" \
-    | tr ' ' '\n' \
-    | parallel --will-cite "
-
