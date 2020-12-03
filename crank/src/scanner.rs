@@ -12,7 +12,7 @@ use std::io::{BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
 
 use bstr::ByteSlice;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 const BUFSIZE: usize = 64 * 1024;
 
@@ -77,12 +77,12 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new(paths: Vec<PathBuf>, delimiter: u8) -> Self {
-        // TODO: panic if repeat path
         Self { paths, delimiter }
     }
+
     /*
-    /// Fold over the lines in the associated files to this SvmScanner and combine the
-    /// results.
+    /// Fold over the lines in the associated files to this scanner
+    /// and combine the results.
     ///
     /// A (cloneable) one-pass iterator is provided over each line per `fold` invocation.
     pub(crate) fn fold_reduce<'a, U, Id, Fold, Reduce>(
@@ -97,16 +97,47 @@ impl Scanner {
         Fold: Fn(U, DelimIter<'a>) -> U + Sync + Send,
         Reduce: Fn(U, U) -> U + Sync + Send,
     {
-        self.blocks
+        self.paths
             .par_iter()
-            .map(|block| {
-                DelimIter::new(block.bytes(&self), b'\n').fold(id(), |acc, line| {
-                    fold(acc, DelimIter::new(line, self.delimiter))
+            .fold(id, |acc, path| {
+                let file = File::open(path).expect("read file");
+                let reader = BufReader::with_capacity(BUFSIZE, file);
+                reader.split(b'\n').fold(acc, |acc_nested, line| {
+                    let line = line.expect("line read");
+                    let words = DelimIter::new(&line, self.delimiter);
+                    fold(acc_nested, words)
                 })
             })
             .reduce(id, reduce)
     }
      */
+
+    /// Similar to the above, but with the guarantee that every file
+    /// is folded over once and no reduction is performed.
+    ///
+    /// The `id` function is passed the index of the
+    pub(crate) fn fold<'a, U, Id, Fold>(
+        &'a self,
+        id: Id,
+        fold: Fold,
+    ) -> impl ParallelIterator<Item = U> + 'a
+    where
+        U: Send,
+        Id: Fn(usize) -> U + Sync + Send + 'a,
+        Fold: Fn(U, DelimIter<'_>) -> U + Sync + Send + 'a,
+    {
+        let delim = self.delimiter;
+        self.paths.par_iter().enumerate().map(move |(i, path)| {
+            let file = File::open(path).expect("read file");
+            let reader = BufReader::with_capacity(BUFSIZE, file);
+            reader.split(b'\n').fold(id(i), |acc, line| {
+                let line = line.expect("line read");
+                let words = DelimIter::new(&line, delim);
+                fold(acc, words)
+            })
+        })
+    }
+
     /*
     /// Loop over each line in parallel; rely on function side effects and shared,
     /// synchronized state to extract information.

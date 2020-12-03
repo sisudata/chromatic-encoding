@@ -1,7 +1,5 @@
 [workspace]
 
-# When adding a new crate to the workspace, also add corresponding lines to
-# Steps 1 and 2 of backend/Dockerfile so that it builds correctly on CI.
 members = [
   "crank"
 ]
