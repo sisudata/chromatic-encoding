@@ -13,6 +13,8 @@ rayon = "1.3"
 itertools = "0.9"
 bstr = "0.2"
 sprs = "0.9"
+ordered-float = "1.0"
+indicatif = "0.15"
 
 [dev-dependencies]
 structopt = "0.3"

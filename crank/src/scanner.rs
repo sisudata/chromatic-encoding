@@ -128,7 +128,7 @@ impl Scanner {
     {
         let delim = self.delimiter;
         self.paths.par_iter().enumerate().map(move |(i, path)| {
-            let file = File::open(path).expect("read file");
+            let file = File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
             let reader = BufReader::with_capacity(BUFSIZE, file);
             reader.split(b'\n').fold(id(i), |acc, line| {
                 let line = line.expect("line read");
@@ -183,7 +183,7 @@ impl Scanner {
         T: Clone + Send + Sync,
     {
         self.paths.par_iter().for_each(|path| {
-            let file = File::open(path).expect("read file");
+            let file = File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
             let reader = BufReader::with_capacity(BUFSIZE, file);
             let mut fname = path.file_name().expect("file name").to_owned();
             fname.push(&suffix);

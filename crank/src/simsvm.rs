@@ -61,6 +61,10 @@ impl DatasetStats {
     pub fn nrows(&self) -> usize {
         self.pages.iter().map(|p| p.nrows).sum()
     }
+
+    pub fn avg_nnz(&self) -> f64 {
+        self.pages.iter().map(|p| p.nnz).sum::<usize>() as f64 / self.nrows() as f64
+    }
 }
 
 /// Convert each file to a sparse matrix.
