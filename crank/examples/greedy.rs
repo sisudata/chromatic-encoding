@@ -72,15 +72,8 @@ fn main() {
         json!({ "csr_duration": format!("{:.0?}", Instant::now().duration_since(csr_start)) })
     );
 
-    let csc_start = Instant::now();
-    let csc: Vec<_> = csr.par_iter().map(|mat| mat.clone().into_csc()).collect();
-    println!(
-        "{}",
-        json!({ "csc_duration": format!("{:.0?}", Instant::now().duration_since(csc_start)) })
-    );
-
     let colors_start = Instant::now();
-    let (colors, remap) = color::greedy(&csr, &csc, opt.k);
+    let (colors, remap) = color::greedy(&csr, opt.k);
     println!(
         "{}",
         json!({

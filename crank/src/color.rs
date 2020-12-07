@@ -13,16 +13,17 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
 };
+use rayon::slice::ParallelSlice;
 
 use crate::SparseMatrix;
 
-/// Returns `(colors, remap)` for each feature of the input dataset equivalently represented
-/// as a vertical stack of the `csr` and `csc` matrices, after applying the chromatic encoding
+/// Returns `(colors, remap)` for each feature of the input dataset
+/// as a vertical stack of the `csr` matrices, after applying the chromatic encoding
 /// greedily (using the online coloring for features in the natural ordering defined by the
 /// feature index).
 ///
 /// `remap` 1-indexes features with the same color.
-pub fn greedy(csr: &[SparseMatrix], csc: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
+pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     // At a high level, we color a graph where the vertices are features and edges exist between
     // features which co-occurr at least `k` times. This graph is colored by an online serial
     // algorithm which receives adjacency information from every vertex to all previously explored
@@ -44,52 +45,66 @@ pub fn greedy(csr: &[SparseMatrix], csc: &[SparseMatrix], k: u32) -> (Vec<u32>, 
     let nfeatures = csr[0].cols();
     let mut greedy = OnlineGreedy::init(nfeatures);
 
-    let max_parallel = 32;
-    let mut collisionss: Vec<_> = iter::repeat_with(|| Vec::<AtomicU64>::with_capacity(nfeatures))
+    let max_parallel = 32; // rayon num threads?
+    let mut collisionss: Vec<_> = iter::repeat_with(|| Vec::<u64>::with_capacity(nfeatures))
         .take(max_parallel)
         .collect();
     for lo in (0..nfeatures).step_by(max_parallel) {
-        let hi = nfeatures.max(lo + max_parallel);
+        let hi = nfeatures.min(lo + max_parallel);
         (lo..hi)
             .into_par_iter()
             .zip(collisionss.par_iter_mut())
             .for_each(|(f, collisions)| {
-                collisions.resize_with(f, || 0.into());
-                collisions.iter_mut().for_each(|c| *c.get_mut() = 0);
-
-                csc.par_iter().zip(csr.par_iter()).for_each(|(csc, csr)| {
-                    csc.outer_view(f)
-                        .unwrap()
-                        .iter()
-                        .map(|(row_ix, _)| row_ix)
-                        .for_each(|row_ix| {
-                            csr.outer_view(row_ix)
-                                .unwrap()
-                                .iter()
-                                .map(|(col_ix, _)| col_ix)
-                                .take_while(|&col_ix| col_ix < f)
-                                .for_each(|col_ix| {
-                                    collisions[col_ix].fetch_add(1, Ordering::Relaxed);
-                                })
-                        })
-                })
+                let old_size = collisions.len();
+                collisions.resize(f, 0);
+                let old_size = collisions.len().min(old_size);
+                collisions.iter_mut().take(old_size).for_each(|c| *c = 0);
             });
-
-        atomic::fence(Ordering::SeqCst);
-
-        for collisions in &collisionss {
-            let nbrs: Vec<usize> = collisions
-                .into_par_iter()
-                .enumerate()
-                .filter_map(|(nbr, cnt)| {
-                    if cnt.load(Ordering::Relaxed) >= k.into() {
-                        Some(nbr)
-                    } else {
-                        None
+        // TODO size improvement (over colisionss: just Edge=u64 hashmap like edges.rs)
+        for matrix in csr {
+            let upper_bounds: Vec<_> = matrix
+                .indptr()
+                .par_windows(2)
+                .map(|lohi| {
+                    let col_ixs = &matrix.indices()[(lohi[0] as usize)..(lohi[1] as usize)];
+                    match col_ixs.binary_search(&(hi as u32)) {
+                        Ok(x) => x + 1,
+                        Err(x) => x,
                     }
                 })
                 .collect();
-            greedy.add(nbrs.into_iter())
+            (lo..hi)
+                .into_par_iter()
+                .zip(collisionss.par_iter_mut())
+                .for_each(|(f, collisions)| {
+                    let f = f as u32;
+                    for (row, ub) in matrix.outer_iterator().zip(upper_bounds.iter().copied()) {
+                        let col_ixs = row.indices();
+                        let mut new_ub = 0;
+                        for i in (0..ub).rev() {
+                            if col_ixs[i] == f {
+                                new_ub = i;
+                                break;
+                            }
+                            if col_ixs[i] < f {
+                                break;
+                            }
+                        }
+                        for &col_ix in &col_ixs[..new_ub] {
+                            collisions[col_ix as usize] += 1;
+                        }
+                    }
+                })
+        }
+
+        let collisionss = &collisionss[..(hi - lo)];
+        for collisions in collisionss {
+            let nbrs = collisions
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(nbr, cnt)| if cnt >= k.into() { Some(nbr) } else { None });
+            greedy.add(nbrs)
         }
     }
 
