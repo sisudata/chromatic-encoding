@@ -8,6 +8,9 @@
 # evaluation stats to ${dataset}.json,
 # and the final vowpal models to ${dataset}.model.
 #
+# If the dataset name is prefixed by "${encoding}_" then expects the same
+# set of files from tarballs retrieved from encode/data instead.
+#
 # Expects S3ROOT, DATASETS to be set.
 
 set -euo pipefail
@@ -33,7 +36,11 @@ spanning_tree >wabbit/data/spanning_tree.out 2>wabbit/data/spanning_tree.err
 trap "killall spanning_tree && rm -f wabbit/data/spanning_tree.{out,err}" EXIT
 
 for dataset in $to_get ; do
-    cp clean/data/${dataset}.tar wabbit/data
+    origin=clean/data
+    if [[ $dataset == weight_* ]] ; then
+        origin=encode/data
+    fi
+    cp $origin/${dataset}.tar wabbit/data
 
     echo '{' > wabbit/data/${dataset}.json
     
