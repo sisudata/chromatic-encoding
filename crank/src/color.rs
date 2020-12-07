@@ -38,84 +38,64 @@ pub fn greedy(csr: &[SparseMatrix], csc: &[SparseMatrix], k: u32) -> (Vec<u32>, 
     //
     // We can also parallelize the collision counting, even if the coloring algorithm is serial,
     // we can start counting collisions for the next few vertices while the current one is still
-    // completing.
+    // completing. There's a fancy way of doing this via par_bridge, but that requires re-entrant
+    // mutexes to serialize rayon tasks at the consumer side and is generally too messy.
+    // Dumber chunk-based parallelism is easier.
     let nfeatures = csr[0].cols();
-    let ref greedy = Mutex::new(OnlineGreedy::init(nfeatures));
-    let ref cvar = Condvar::new();
+    let mut greedy = OnlineGreedy::init(nfeatures);
 
-    // TODO: this deadlocks like crazy, need re-entrant mutex
-    let mut count = 0;
-    let max_parallel = 5;
-    iter::from_fn(move || {
-        if count == nfeatures {
-            return None;
-        }
+    let max_parallel = 32;
+    let mut collisionss: Vec<_> = iter::repeat_with(|| Vec::<AtomicU64>::with_capacity(nfeatures))
+        .take(max_parallel)
+        .collect();
+    for lo in (0..nfeatures).step_by(max_parallel) {
+        let hi = nfeatures.max(lo + max_parallel);
+        (lo..hi)
+            .into_par_iter()
+            .zip(collisionss.par_iter_mut())
+            .for_each(|(f, collisions)| {
+                collisions.resize_with(f, || 0.into());
+                collisions.iter_mut().for_each(|c| *c.get_mut() = 0);
 
-        count += 1;
-        let next = count - 1;
-
-        let mut greedy = greedy.lock().unwrap();
-        while greedy.current + max_parallel < next {
-            greedy = cvar.wait(greedy).unwrap()
-        }
-        cvar.notify_all();
-        Some(next)
-    })
-    // Parallel bridge is intentional here since the semaphore in the for_each
-    // below serializes anyway in order, so it doesn't make sense to start on
-    // features which have a high index.
-    .par_bridge()
-    .map(|f| {
-        //print!("starting feat {}\n", f);
-        // To keep memory usage low, it's important to cap concurrent collision counters
-        // via semaphore (TODO). We're careful not to call rayon under deadlock (rayon/issues/592).
-
-        let collisions: Vec<AtomicU64> = iter::repeat_with(|| 0.into()).take(f).collect();
-
-        csc.par_iter().zip(csr.par_iter()).for_each(|(csc, csr)| {
-            csc.outer_view(f)
-                .unwrap()
-                .iter()
-                .map(|(row_ix, _)| row_ix)
-                .for_each(|row_ix| {
-                    csr.outer_view(row_ix)
+                csc.par_iter().zip(csr.par_iter()).for_each(|(csc, csr)| {
+                    csc.outer_view(f)
                         .unwrap()
                         .iter()
-                        .map(|(col_ix, _)| col_ix)
-                        .take_while(|&col_ix| col_ix < f)
-                        .for_each(|col_ix| {
-                            collisions[col_ix].fetch_add(1, Ordering::Relaxed);
+                        .map(|(row_ix, _)| row_ix)
+                        .for_each(|row_ix| {
+                            csr.outer_view(row_ix)
+                                .unwrap()
+                                .iter()
+                                .map(|(col_ix, _)| col_ix)
+                                .take_while(|&col_ix| col_ix < f)
+                                .for_each(|col_ix| {
+                                    collisions[col_ix].fetch_add(1, Ordering::Relaxed);
+                                })
                         })
                 })
-        });
+            });
 
-        let nbrs: Vec<usize> = collisions
-            .into_par_iter()
-            .enumerate()
-            .filter_map(|(nbr, collisions)| {
-                if collisions.into_inner() >= k.into() {
-                    Some(nbr)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // intentionally separate tasks to allow intermediate parallelism
-        (nbrs, f)
-    })
-    .for_each(|(nbrs, f)| {
-        let mut greedy = greedy.lock().unwrap();
-        while greedy.current != f {
-            greedy = cvar.wait(greedy).unwrap()
+        atomic::fence(Ordering::SeqCst);
+
+        for collisions in &collisionss {
+            let nbrs: Vec<usize> = collisions
+                .into_par_iter()
+                .enumerate()
+                .filter_map(|(nbr, cnt)| {
+                    if cnt.load(Ordering::Relaxed) >= k.into() {
+                        Some(nbr)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            greedy.add(nbrs.into_iter())
         }
-        greedy.add(nbrs.into_iter());
-        cvar.notify_all();
-    });
+    }
 
-    let mut greedy = greedy.lock().unwrap();
     greedy.pb.finish_and_clear();
     assert!(greedy.current == greedy.nfeatures);
-    (mem::take(&mut greedy.colors), mem::take(&mut greedy.remap))
+    (greedy.colors, greedy.remap)
 }
 
 /// Structure to maintain online greedy coloring state.
@@ -154,6 +134,7 @@ impl OnlineGreedy {
     /// `colors.len()`-th. Updates all internal structures to the newly
     /// assigned value for that vertex.
     fn add(&mut self, neighbors: impl Iterator<Item = usize>) {
+        // par impl for this in kdd12
         assert!(self.current < self.nfeatures);
         let mut is_color_adjacent = vec![false; self.ncolors()];
         let mut nadjacent_colors = 0;
