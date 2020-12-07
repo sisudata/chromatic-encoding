@@ -33,16 +33,13 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     // Adjacency information is communicated via collision counts, where a collision between
     // two features is a row where they co-occurr.
     //
-    // Collision counting is parallel for each feature we're measuring collisions with
-    // previously explored vertices against, by parallelizing along sparse matrix pages.
-    // For each sparse matrix page, we get the rows this feature is present in via CSC
-    // matrix and then the colliding features for each of those rows via CSR matrix.
+    // We can parallelize the collision counting, even if the coloring algorithm is serial,
+    // by counting collisions for several few vertices at a time.
     //
-    // We can also parallelize the collision counting, even if the coloring algorithm is serial,
-    // we can start counting collisions for the next few vertices while the current one is still
-    // completing. There's a fancy way of doing this via par_bridge, but that requires re-entrant
+    // There's a fancy way of doing this via par_bridge, but that requires re-entrant
     // mutexes to serialize rayon tasks at the consumer side and is generally too messy.
-    // Dumber chunk-based parallelism is easier.
+    // Dumber chunk-based parallelism is easier, which is what's implemented below.
+
     let nfeatures = csr[0].cols();
     let mut greedy = OnlineGreedy::init(nfeatures);
 
@@ -53,8 +50,10 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     outer.set_prefix("features");
     outer.inc(0);
 
-    let per_thread = 1024;
-    let max_parallel = 1024 * per_thread;
+    // These constants generally keep memory usage under 32GB, they can be modified
+    // as necessary for a speed/memory tradeoff.
+    let per_thread = 1024 * 4;
+    let max_parallel = 1024 * 4 * per_thread;
     for lo in (0..nfeatures).step_by(max_parallel) {
         let hi = nfeatures.min(lo + max_parallel);
         let mut collisionss = vec![HashMap::<u32, u64>::new(); hi - lo];
