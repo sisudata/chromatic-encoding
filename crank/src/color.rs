@@ -1,6 +1,7 @@
 //! The core coloring functionality for sparse datasets represented
 //! as pages of sparse matrices.
 
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
 use std::mem;
@@ -46,22 +47,11 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     let mut greedy = OnlineGreedy::init(nfeatures);
 
     let max_parallel = 32; // rayon num threads?
-    let mut collisionss: Vec<_> = iter::repeat_with(|| Vec::<u64>::with_capacity(nfeatures))
-        .take(max_parallel)
-        .collect();
     for lo in (0..nfeatures).step_by(max_parallel) {
         let hi = nfeatures.min(lo + max_parallel);
-        (lo..hi)
-            .into_par_iter()
-            .zip(collisionss.par_iter_mut())
-            .for_each(|(f, collisions)| {
-                let old_size = collisions.len();
-                collisions.resize(f, 0);
-                let old_size = collisions.len().min(old_size);
-                collisions.iter_mut().take(old_size).for_each(|c| *c = 0);
-            });
-        // TODO size improvement (over colisionss: just Edge=u64 hashmap like edges.rs)
+        let mut collisionss = vec![HashMap::<u32, u64>::new(); hi - lo];
         for matrix in csr {
+            // TODO: parallel this across csr mats?
             let upper_bounds: Vec<_> = matrix
                 .indptr()
                 .par_windows(2)
@@ -90,20 +80,18 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
                                 break;
                             }
                         }
-                        for &col_ix in &col_ixs[..new_ub] {
-                            collisions[col_ix as usize] += 1;
+                        for col_ix in &col_ixs[..new_ub] {
+                            *collisions.entry(*col_ix).or_default() += 1;
                         }
                     }
                 })
         }
 
-        let collisionss = &collisionss[..(hi - lo)];
         for collisions in collisionss {
-            let nbrs = collisions
-                .iter()
-                .copied()
-                .enumerate()
-                .filter_map(|(nbr, cnt)| if cnt >= k.into() { Some(nbr) } else { None });
+            let nbrs =
+                collisions
+                    .into_iter()
+                    .filter_map(|(nbr, cnt)| if cnt >= k.into() { Some(nbr) } else { None });
             greedy.add(nbrs)
         }
     }
@@ -148,7 +136,7 @@ impl OnlineGreedy {
     /// Observe the adjacency for the next vertex, which must be the
     /// `colors.len()`-th. Updates all internal structures to the newly
     /// assigned value for that vertex.
-    fn add(&mut self, neighbors: impl Iterator<Item = usize>) {
+    fn add(&mut self, neighbors: impl Iterator<Item = u32>) {
         // par impl for this in kdd12
         assert!(self.current < self.nfeatures);
         let mut is_color_adjacent = vec![false; self.ncolors()];
@@ -156,12 +144,12 @@ impl OnlineGreedy {
 
         for nbr in neighbors {
             assert!(
-                nbr < self.current,
+                (nbr as usize) < self.current,
                 "nbr {} >= current {}",
                 nbr,
                 self.current
             );
-            let nbr_color = self.colors[nbr];
+            let nbr_color = self.colors[nbr as usize];
             if !is_color_adjacent[nbr_color as usize] {
                 is_color_adjacent[nbr_color as usize] = true;
                 nadjacent_colors += 1;
