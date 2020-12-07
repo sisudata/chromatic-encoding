@@ -9,12 +9,12 @@ use std::sync::atomic;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 
-use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
 };
-use rayon::slice::ParallelSlice;
+use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
 use crate::SparseMatrix;
 
@@ -46,57 +46,67 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     let nfeatures = csr[0].cols();
     let mut greedy = OnlineGreedy::init(nfeatures);
 
-    let max_parallel = 32; // rayon num threads?
+    let sty = ProgressStyle::default_bar()
+        .template("{prefix} [{elapsed_precise}] [{bar:40}] {pos:>10}/{len:10} (eta {eta})")
+        .progress_chars("##-");
+    let outer = ProgressBar::new(nfeatures.try_into().unwrap()).with_style(sty.clone());
+    outer.set_prefix("features");
+    outer.inc(0);
+
+    let per_thread = 1024;
+    let max_parallel = 1024 * per_thread;
     for lo in (0..nfeatures).step_by(max_parallel) {
         let hi = nfeatures.min(lo + max_parallel);
         let mut collisionss = vec![HashMap::<u32, u64>::new(); hi - lo];
+
+        let inner = ProgressBar::new(csr.len().try_into().unwrap()).with_style(sty.clone());
+        inner.set_prefix("pages   ");
+        inner.inc(0);
         for matrix in csr {
-            // TODO: parallel this across csr mats?
-            let upper_bounds: Vec<_> = matrix
-                .indptr()
-                .par_windows(2)
-                .map(|lohi| {
-                    let col_ixs = &matrix.indices()[(lohi[0] as usize)..(lohi[1] as usize)];
-                    match col_ixs.binary_search(&(hi as u32)) {
-                        Ok(x) => x + 1,
-                        Err(x) => x,
-                    }
-                })
-                .collect();
-            (lo..hi)
+            let nchunks = (hi - lo + per_thread - 1) / per_thread;
+            (0..nchunks)
                 .into_par_iter()
-                .zip(collisionss.par_iter_mut())
-                .for_each(|(f, collisions)| {
-                    let f = f as u32;
-                    for (row, ub) in matrix.outer_iterator().zip(upper_bounds.iter().copied()) {
+                .zip(collisionss.par_chunks_mut(per_thread))
+                .for_each(|(chunk_ix, collisions)| {
+                    let lo_feat = (chunk_ix * per_thread + lo) as u32;
+                    let hi_feat = hi.min((chunk_ix + 1) * per_thread + lo) as u32;
+                    for row in matrix.outer_iterator() {
                         let col_ixs = row.indices();
-                        let mut new_ub = 0;
-                        for i in (0..ub).rev() {
-                            if col_ixs[i] == f {
-                                new_ub = i;
-                                break;
+
+                        let ub = match col_ixs.binary_search(&hi_feat) {
+                            Ok(x) => x,
+                            Err(x) => x,
+                        };
+
+                        let lb = match col_ixs[..ub].binary_search(&lo_feat) {
+                            Ok(x) => x,
+                            Err(x) => x,
+                        };
+
+                        for write_ix in lb..ub {
+                            for col_ix in &col_ixs[..lb] {
+                                *collisions[(col_ixs[write_ix] - lo_feat) as usize]
+                                    .entry(*col_ix)
+                                    .or_default() += 1;
                             }
-                            if col_ixs[i] < f {
-                                break;
-                            }
-                        }
-                        for col_ix in &col_ixs[..new_ub] {
-                            *collisions.entry(*col_ix).or_default() += 1;
                         }
                     }
-                })
+                });
+            inner.inc(1);
         }
+        inner.finish_and_clear();
 
         for collisions in collisionss {
             let nbrs =
                 collisions
                     .into_iter()
                     .filter_map(|(nbr, cnt)| if cnt >= k.into() { Some(nbr) } else { None });
-            greedy.add(nbrs)
+            greedy.add(nbrs);
+            outer.inc(1);
         }
     }
 
-    greedy.pb.finish_and_clear();
+    outer.finish_and_clear();
     assert!(greedy.current == greedy.nfeatures);
     (greedy.colors, greedy.remap)
 }
@@ -110,7 +120,6 @@ struct OnlineGreedy {
     remap: Vec<u32>,
     nfeat_per_color: Vec<u32>,
     current: usize,
-    pb: ProgressBar,
 }
 
 impl OnlineGreedy {
@@ -121,11 +130,6 @@ impl OnlineGreedy {
             remap: vec![0u32; nfeatures],
             nfeat_per_color: Vec::new(),
             current: 0,
-            pb: ProgressBar::new(nfeatures.try_into().unwrap()).with_style(
-                ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] [{bar:40}] {pos:>10}/{len:10} (eta {eta})")
-                    .progress_chars("##-"),
-            ),
         }
     }
 
@@ -170,6 +174,5 @@ impl OnlineGreedy {
         self.remap[self.current] = self.nfeat_per_color[chosen] + 1;
         self.nfeat_per_color[chosen] += 1;
         self.current += 1;
-        self.pb.inc(1);
     }
 }
