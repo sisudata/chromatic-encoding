@@ -51,7 +51,9 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
     outer.inc(0);
 
     // These constants generally keep memory usage under 32GB, they can be modified
-    // as necessary for a speed/memory tradeoff.
+    // as necessary for a speed/memory tradeoff. Per thread should be in principle
+    // tuned somehow to each dataset so whp there's at least something each thread is
+    // aggregating (as opposed to doing no-ops).
     let per_thread = 1024 * 4;
     let max_parallel = 1024 * 4 * per_thread;
     for lo in (0..nfeatures).step_by(max_parallel) {

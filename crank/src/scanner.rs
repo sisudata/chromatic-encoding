@@ -97,25 +97,27 @@ impl Scanner {
         Fold: Fn(U, DelimIter<'a>) -> U + Sync + Send,
         Reduce: Fn(U, U) -> U + Sync + Send,
     {
+        let delim = self.delimiter;
         self.paths
             .par_iter()
-            .fold(id, |acc, path| {
-                let file = File::open(path).expect("read file");
+            .enumerate()
+            .map(move |(i, path)| {
+                let file =
+                    File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
                 let reader = BufReader::with_capacity(BUFSIZE, file);
-                reader.split(b'\n').fold(acc, |acc_nested, line| {
+                reader.split(b'\n').fold(id(), |acc, line| {
                     let line = line.expect("line read");
-                    let words = DelimIter::new(&line, self.delimiter);
-                    fold(acc_nested, words)
+                    let words = DelimIter::new(&line, delim);
+                    fold(acc, words)
                 })
             })
             .reduce(id, reduce)
-    }
-     */
+    }*/
 
     /// Similar to the above, but with the guarantee that every file
     /// is folded over once and no reduction is performed.
     ///
-    /// The `id` function is passed the index of the
+    /// The `id` function is passed the index of the file getting folded over.
     pub(crate) fn fold<'a, U, Id, Fold>(
         &'a self,
         id: Id,

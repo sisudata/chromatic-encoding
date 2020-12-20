@@ -10,6 +10,7 @@ use sprs::CsMatI;
 pub mod color;
 mod scanner;
 pub mod simsvm;
+pub mod svmlight;
 
 pub use scanner::{DelimIter, Scanner};
 
