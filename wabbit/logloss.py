@@ -5,11 +5,12 @@
 # outputs two lines to stdout
 # "accuracy": 1 - <0-1 loss>,
 # "logloss": <logistic loss>,
+# "auc": <auc loss>
 
 import sys
 import numpy as np
 from scipy.special import expit
-from sklearn.metrics import log_loss, accuracy_score
+from sklearn.metrics import log_loss, accuracy_score, roc_auc_score
 
 labelfile = sys.argv[1]
 predfile = sys.argv[2]
@@ -21,4 +22,6 @@ assert len(labels) == len(preds)
 labels = labels > 0
 
 print('"accuracy":', accuracy_score(labels, preds > 0), ",")
-print('"logloss":', log_loss(labels, expit(preds)), ",")
+preds = expit(preds)
+print('"logloss":', log_loss(labels, preds), ",")
+print('"auc":', roc_auc_score(labels, preds), ",")

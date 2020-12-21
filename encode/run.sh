@@ -58,16 +58,21 @@ for dataset_encoding in $to_get ; do
             test=$(echo "$all" | grep test)
 
             TRUNCATE=${TRUNCATE:-1000000}
-            all=$(echo "$all" | parallel --will-cite '
-                 file="{}"
+            pushd encode/data >/dev/null
+            all=$(find . -maxdepth 1 -type f -regextype posix-extended -regex \
+                 "./${dataset}."'(train|test)\.svm\.[0-9]+' -print0 \
+                 | parallel --will-cite -0 '
+                 base=$(basename "{}")
+                 file="'"${encoding}"'_${base}"
                  orig="${file/.svm/.original.svm}"
-                 mv $file $orig
-                 awk -v TRUNCATE='"${TRUNCATE}"' -f encode/ft.awk $orig > $file
-                 zstd --rm -f -q $orig -o ${orig}.zst
+                 awk -v TRUNCATE='"${TRUNCATE}"' -f ../ft.awk $base > $file
+                 zstd --rm -f -q $base -o ${orig}.zst
                  zstd -f -q $file -o ${file}.zst
                  basename ${orig}.zst
                  basename ${file}.zst
+                 mv $file $base
             ')
+            popd >/dev/null
             # at this point the files referred to by $train and $test are frequency-truncated
 
             cargo build -p crank --release --example svm2bins > /dev/null 2>&1
@@ -75,6 +80,8 @@ for dataset_encoding in $to_get ; do
                  --train $train --test $test \
                  --train-out encode/data/${dataset_encoding}.train \
                  --test-out encode/data/${dataset_encoding}.test
+
+            rm $train $test
             
             ;;
         weight)
@@ -126,7 +133,7 @@ for dataset_encoding in $to_get ; do
        ${dataset}.${encoding}.bin.tar.zst
     popd >/dev/null
 
-    rm encode/data/${dataset}.{train,test}.svm.* # all svms and zsts
+    rm -f encode/data/${dataset}.{train,test}.svm.* # all svms and zsts
 
     
     cache_write encode/data/${encoding}_${dataset}.tar    
