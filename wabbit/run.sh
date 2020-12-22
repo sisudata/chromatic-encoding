@@ -37,7 +37,7 @@ trap "killall spanning_tree && rm -f wabbit/data/spanning_tree.{out,err}" EXIT
 
 for dataset in $to_get ; do
     origin=clean/data
-    if [[ $dataset == weight_* ]] ; then
+    if [[ $dataset == ce_* ]] || [[ $dataset == ft_* ]] ; then
         origin=encode/data
     fi
     cp $origin/${dataset}.tar wabbit/data

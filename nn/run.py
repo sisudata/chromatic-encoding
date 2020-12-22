@@ -15,6 +15,7 @@ from time import time
 MODELNAME = os.environ.get('MODELNAME')
 DATASET = os.environ.get('DATASET')
 ENCODING = os.environ.get('ENCODING')
+TRUNCATE = os.environ.get('TRUNCATE')
 CUDA = os.environ.get('CUDA_VISIBLE_DEVICES')
 
 
@@ -109,6 +110,7 @@ def runall(train_dataset,
     emit["dataset"] = DATASET
     emit["encoding"] = ENCODING
     emit["device"] = device
+    emit["truncate"] = TRUNCATE
     print(emit)
 
     device = torch.device(device)
@@ -181,17 +183,13 @@ emit = runall(
     train_dataset,
     test_dataset,
     device,
-    # was 100, dropped to 10 to wait less, seemed reasonable given
-    # no early stopping and LR tuning to achieve lower timings variance
     epoch=20,
-    learning_rate=1e-3, # TODO tune this
+    learning_rate=1e-3,
     batch_size=256,
-    weight_decay=1e-6, # TODO tune this
+    weight_decay=1e-6,
     disable_tqdm=False)
-
 
 import json
 
 with open(json_out, 'w', encoding='utf-8') as f:
     json.dump(emit, f, ensure_ascii=False, indent=4, sort_keys=True)
-

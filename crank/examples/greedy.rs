@@ -45,6 +45,11 @@ struct Opt {
     /// Minimum edge weight `k` for use in coloring. Must be at least 1.
     #[structopt(long)]
     k: u32,
+
+    /// Use at least this many colors for the embedding. Can be more if greedy
+    /// coloring requires more.
+    #[structopt(long)]
+    ncolors: u32,
 }
 
 fn main() {
@@ -154,6 +159,6 @@ fn encode(colors: &[u32], remap: &[u32], scanner: &Scanner, k: u32) {
             }
             writer.write_all(b"\n").unwrap();
         },
-        &format!("_greedy_{}", k),
+        "_greedy",
     );
 }

@@ -27,19 +27,30 @@ npm install -g relaxed-json
 
 ## Usage
 
-All scripts are intended to be run from the repository root (the directory containing this `README.md` file).
+All scripts are intended to be run from the repository root (the directory containing this `README.md` file). Environment variables set parameters for all scripts (though some scripts ignore some parameters which don't apply to them).
 
-All scripts read and write to S3 to cache intermediate data if not available on the local FD, using prefix `S3ROOT` which must be set as an environment variable. `DATASETS` defines which datasets to operate on, and should be a space-delimited string containing words `urltoy url kdda kddb kdd12`. `ENCODINGS` specifies the different encodings to try, `ft` (feature truncation) or `weight` (chromatic encoding). The table below summarizes what each script does. TODO: weight -> ce, add ht encoding.
+* All scripts read and write to S3 to cache intermediate data if not available on the local FD, using prefix `S3ROOT` which must be set as an environment variable.
+* `DATASETS` defines which datasets to operate on, and should be a space-delimited string containing words `urltoy url kdda kddb kdd12`.
+* `ENCODINGS` specifies the different encodings to try, `ft` (feature truncation) or `ce` (chromatic encoding). The table below summarizes what each script does. TODO: ht encoding
+* `TRUNCATES` specifies the feature truncation limiting input width
+* `CUDA_VISIBLE_DEVICES` toggles GPU use if set to a GPU index (max 1 GPU)
 
 ```
 export S3ROOT="s3://sisu-datasets/ce-build"
 export DATASETS="urltoy url kdda kddb kdd12"
 export ENCODINGS="ft weight"
+export TRUNCATES="1000 10000"
+export CUDA_VISIBLE_DEVICES=0
 ```
 
 | Script | Description |
 | --- | --- |
 | `bash raw/run.sh` | download raw datasets |
 | `bash clean/run.sh` | clean datasets |
-| `bash encode/run.sh` | encode datasets with specified encodings under (TODO) default parameters |
-| `bash nn/run.sh` | neural net training on encoded datasets |
+| `bash encode/run.sh` | encode datasets with specified encodings |
+| `bash nn/run.sh` | neural net train/test on encoded datasets |
+| `bash wabbit/run.sh` | vowpal wabbit train/test on clean datasets |
+
+`wabbit/run.sh` allows datasets of the form `${encoding}_${truncate}_${dataset}`, e.g., `ce_1000_url` for debug purposes.
+
+For most GPUs, I would not recommend setting any `TRUNCATES` over `100000`.
