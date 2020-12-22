@@ -1,15 +1,17 @@
 //! The core coloring functionality for sparse datasets represented
 //! as pages of sparse matrices.
 
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter;
 use std::mem;
 use std::sync::atomic;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
+use rand_pcg::Lcg64Xsh32;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
@@ -35,8 +37,8 @@ pub fn remap(ncolors: u32, colors: &[u32]) -> Vec<u32> {
     remap
 }
 
-/// Returns `(ncolors, colors)` for a max-degree-ordered coloring of the graph.
-pub fn greedy(graph: &Graph) -> (u32, Vec<u32>) {
+/// Returns `(ncolors, colors, log_info)` for a max-degree-ordered coloring of the graph.
+pub fn greedy(graph: &Graph) -> (u32, Vec<u32>, HashMap<String, f64>) {
     let nvertices = graph.nvertices();
     let mut vertices: Vec<_> = (0..nvertices).map(|v| v as Vertex).collect();
     vertices.sort_unstable_by_key(|&v| graph.degree(v));
@@ -92,156 +94,150 @@ pub fn greedy(graph: &Graph) -> (u32, Vec<u32>) {
         }
     }
 
-    (adjacent_colors.len() as u32, colors)
+    let ncolors = adjacent_colors.len();
+    (
+        ncolors as u32,
+        colors,
+        [("greedy_ncolors".to_owned(), ncolors as f64)]
+            .iter()
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Returns `(ncolors, colors)` for a Glauber-colored graph. If greedy colors
 /// requires more colors than specified, then increases the color count to that many.
-pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) {
-    unimplemented!()
-    // implement parallel monte carlo with *SORTED* neighbors
-    // make neighbors atomic u64s
-}
+pub fn glauber(
+    graph: &Graph,
+    ncolors: u32,
+    nsamples: usize,
+) -> (u32, Vec<u32>, HashMap<String, f64>) {
+    let (greedy_ncolors, colors, _) = greedy(graph);
+    assert!(
+        greedy_ncolors <= ncolors,
+        "greedy ncolors {} budget {}",
+        greedy_ncolors,
+        ncolors
+    );
 
-// TODO impl greedy() and glauber()
-// print collision stats in greedy.rs
-// try to improve glauber with paralell mcmcm
+    // https://www.math.cmu.edu/~af1p/Texfiles/colorbdd.pdf
+    // https://www.math.cmu.edu/~af1p/Teaching/MCC17/Papers/colorJ.pdf
+    // run glauber markov chain on a coloring
+    // chain sampling can be parallel with some simple conflict detection
 
-/*
-    let nfeatures = csr[0].cols();
-    let mut greedy = OnlineGreedy::init(nfeatures);
+    let colors = colors
+        .into_iter()
+        .map(|x| AtomicU32::new(x))
+        .collect::<Vec<_>>();
+    let nthreads = 4; // rayon::current_num_threads() as usize;
 
-    let sty = ProgressStyle::default_bar()
-        .template("{prefix} [{elapsed_precise}] [{bar:40}] {pos:>10}/{len:10} (eta {eta})")
-        .progress_chars("##-");
-    let outer = ProgressBar::new(nfeatures.try_into().unwrap()).with_style(sty.clone());
-    outer.set_prefix("features");
-    outer.inc(0);
+    let conflicts = (0..nthreads)
+        .into_par_iter()
+        .map(|i| {
+            let nsamples = (nsamples / nthreads).max(1);
+            let mut rng = Lcg64Xsh32::new(0xcafef00dd15ea5e5, i as u64);
+            let mut adjacent_color: Vec<bool> = vec![false; ncolors as usize];
+            let mut neighbor_colors: Vec<u32> = Vec::new();
+            let mut conflicts = 0;
 
-    // These constants generally keep memory usage under 32GB, they can be modified
-    // as necessary for a speed/memory tradeoff. Per thread should be in principle
-    // tuned somehow to each dataset so whp there's at least something each thread is
-    // aggregating (as opposed to doing no-ops).
-    let per_thread = 1024 * 4;
-    let max_parallel = 1024 * 4 * per_thread;
-    for lo in (0..nfeatures).step_by(max_parallel) {
-        let hi = nfeatures.min(lo + max_parallel);
-        let mut collisionss = vec![HashMap::<u32, u64>::new(); hi - lo];
+            for _ in 0..nsamples {
+                // loop invariant is that none of adjacent_color elements are true
 
-        let inner = ProgressBar::new(csr.len().try_into().unwrap()).with_style(sty.clone());
-        inner.set_prefix("pages   ");
-        inner.inc(0);
-        for matrix in csr {
-            let nchunks = (hi - lo + per_thread - 1) / per_thread;
-            (0..nchunks)
-                .into_par_iter()
-                .zip(collisionss.par_chunks_mut(per_thread))
-                .for_each(|(chunk_ix, collisions)| {
-                    let lo_feat = (chunk_ix * per_thread + lo) as u32;
-                    let hi_feat = hi.min((chunk_ix + 1) * per_thread + lo) as u32;
-                    for row in matrix.outer_iterator() {
-                        let col_ixs = row.indices();
+                let reservation = (ncolors + 1) as u32;
 
-                        let ub = match col_ixs.binary_search(&hi_feat) {
-                            Ok(x) => x,
-                            Err(x) => x,
-                        };
+                loop {
+                    let v: u32 = rng.gen_range(0, graph.nvertices() as u32);
 
-                        let lb = match col_ixs[..ub].binary_search(&lo_feat) {
-                            Ok(x) => x,
-                            Err(x) => x,
-                        };
-
-                        for write_ix in lb..ub {
-                            for col_ix in &col_ixs[..lb] {
-                                *collisions[(col_ixs[write_ix] - lo_feat) as usize]
-                                    .entry(*col_ix)
-                                    .or_default() += 1;
-                            }
-                        }
+                    // "claim" this vertex
+                    let prev = colors[v as usize].swap(reservation, Ordering::Relaxed);
+                    if prev == reservation {
+                        conflicts += 1;
+                        continue;
                     }
-                });
-            inner.inc(1);
-        }
-        inner.finish_and_clear();
 
-        for collisions in collisionss {
-            let nbrs =
-                collisions
-                    .into_iter()
-                    .filter_map(|(nbr, cnt)| if cnt >= k.into() { Some(nbr) } else { None });
-            greedy.add(nbrs);
-            outer.inc(1);
-        }
-    }
+                    let mut nadjacent_colors = 0;
+                    let mut fail = v;
+                    for &w in graph.neighbors(v) {
+                        // lock
+                        let c = colors[w as usize].swap(reservation, Ordering::Relaxed);
+                        if c == reservation {
+                            fail = w;
+                            break;
+                        }
+                        if !adjacent_color[c as usize] {
+                            nadjacent_colors += 1;
+                            adjacent_color[c as usize] = true;
+                        }
+                        neighbor_colors.push(c);
+                    }
+                    if fail != v {
+                        // unlock
+                        colors[v as usize].store(prev, Ordering::Relaxed);
+                        graph
+                            .neighbors(v)
+                            .iter()
+                            .take_while(|&&w| w != fail)
+                            .zip(neighbor_colors.iter())
+                            .for_each(|(&w, &c)| colors[w as usize].store(c, Ordering::Relaxed));
+                        conflicts += 1;
+                        for i in adjacent_color.iter_mut() {
+                            *i = false;
+                        }
+                        neighbor_colors.clear();
+                        continue;
+                    }
 
-    assert!(greedy.current == greedy.nfeatures);
-    (greedy.colors, greedy.remap)
-}
+                    // attempt to get lucky once
+                    let mut chosen = rng.gen_range(0, ncolors);
+                    if adjacent_color[chosen as usize] {
+                        chosen = adjacent_color
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .filter(|(_, x)| !x)
+                            .map(|(i, _)| i as u32)
+                            .nth(rng.gen_range(0, (ncolors as usize) - nadjacent_colors))
+                            .expect("nth");
+                    }
 
-/// Structure to maintain online greedy coloring state.
-struct OnlineGreedy {
-    nfeatures: usize,
-    colors: Vec<u32>,
-    /// A vector which maps the original feature index into the rank of that feature
-    /// for the color it was assigned (in the ordering of color assignments).
-    remap: Vec<u32>,
-    nfeat_per_color: Vec<u32>,
-    current: usize,
-}
+                    graph
+                        .neighbors(v)
+                        .iter()
+                        .zip(neighbor_colors.iter())
+                        .for_each(|(&w, &c)| colors[w as usize].store(c, Ordering::Relaxed));
 
-impl OnlineGreedy {
-    fn init(nfeatures: usize) -> Self {
-        Self {
-            nfeatures,
-            colors: vec![0u32; nfeatures],
-            remap: vec![0u32; nfeatures],
-            nfeat_per_color: Vec::new(),
-            current: 0,
-        }
-    }
+                    colors[v as usize].store(chosen as u32, Ordering::Relaxed);
 
-    fn ncolors(&self) -> usize {
-        self.nfeat_per_color.len()
-    }
-
-    /// Observe the adjacency for the next vertex, which must be the
-    /// `colors.len()`-th. Updates all internal structures to the newly
-    /// assigned value for that vertex.
-    fn add(&mut self, neighbors: impl Iterator<Item = u32>) {
-        // par impl for this in kdd12
-        assert!(self.current < self.nfeatures);
-        let mut is_color_adjacent = vec![false; self.ncolors()];
-        let mut nadjacent_colors = 0;
-
-        for nbr in neighbors {
-            assert!(
-                (nbr as usize) < self.current,
-                "nbr {} >= current {}",
-                nbr,
-                self.current
-            );
-            let nbr_color = self.colors[nbr as usize];
-            if !is_color_adjacent[nbr_color as usize] {
-                is_color_adjacent[nbr_color as usize] = true;
-                nadjacent_colors += 1;
-                if nadjacent_colors == self.ncolors() {
+                    for i in adjacent_color.iter_mut() {
+                        *i = false;
+                    }
+                    neighbor_colors.clear();
                     break;
                 }
             }
-        }
+            conflicts
+        })
+        .sum::<usize>();
 
-        let chosen = if nadjacent_colors == self.ncolors() {
-            self.nfeat_per_color.push(0);
-            self.nfeat_per_color.len() - 1
-        } else {
-            is_color_adjacent.iter_mut().position(|x| !*x).unwrap()
-        };
+    let colors = colors.into_iter().map(|x| x.into_inner()).collect();
 
-        self.colors[self.current] = chosen as u32;
-        self.remap[self.current] = self.nfeat_per_color[chosen] + 1;
-        self.nfeat_per_color[chosen] += 1;
-        self.current += 1;
-    }
+    // implement parallel monte carlo with *SORTED* neighbors
+    // make neighbors atomic u64s
+    (
+        ncolors,
+        colors,
+        [
+            ("greedy_ncolors".to_owned(), greedy_ncolors as f64),
+            ("nsamples".to_owned(), nsamples as f64),
+            ("conflicts".to_owned(), conflicts as f64),
+            ("nthreads".to_owned(), nthreads as f64),
+            (
+                "conflict_rate".to_owned(),
+                100.0 * conflicts as f64 / (nsamples + conflicts) as f64,
+            ),
+        ]
+        .iter()
+        .cloned()
+        .collect(),
+    )
 }
-*/

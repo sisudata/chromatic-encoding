@@ -90,7 +90,7 @@ fn main() {
     );
 
     let colors_start = Instant::now();
-    let (ncolors, colors) = if opt.ncolors == 0 {
+    let (ncolors, colors, log_info) = if opt.ncolors == 0 {
         color::greedy(&graph)
     } else {
         color::glauber(&graph, opt.ncolors, opt.nsamples)
@@ -103,7 +103,7 @@ fn main() {
             "color_cardinalities": compute_color_cardinalities(&colors, &remap),
             "colors_duration": format!("{:.0?}", Instant::now().duration_since(colors_start)),
             "glauber": opt.ncolors > 0,
-
+            "info": log_info,
         })
     );
 

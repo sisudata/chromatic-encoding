@@ -111,7 +111,7 @@ for dataset_encoding_truncate in $to_get ; do
             test=$(echo "$all" | grep test)
             k=1
             cargo build -p crank --release --example greedy >/dev/null 2>&1
-            target/release/examples/greedy --graph graph/data/${dataset}.graph --train $train --test $test --k "$k" --ncolors "$truncate" > encode/data/${dataset_encoding_truncate}.jsonl
+            target/release/examples/greedy --graph graph/data/${dataset}.graph --train $train --test $test --k "$k" --ncolors "$truncate" | tee encode/data/${dataset_encoding_truncate}.jsonl
             find encode/data/ -maxdepth 1 -type f -regextype posix-extended -regex \
                  "^encode/data/${dataset}."'(train|test)\.svm\.[0-9]+$' -delete
             
