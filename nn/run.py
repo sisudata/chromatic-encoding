@@ -34,12 +34,12 @@ test_X, test_y = binprefix(*sys.argv[5:9])
 t = time() - t
 print('loaded test binary csr in {:7.4f} sec'.format(t))
 
-ncol = max(train_X.shape[1], test_X.shape[1])
+NCOL = max(train_X.shape[1], test_X.shape[1])
 
 from .utils import rpad
 
-train_X = rpad(train_X, ncol)
-test_X = rpad(test_X, ncol)
+train_X = rpad(train_X, NCOL)
+test_X = rpad(test_X, NCOL)
 
 import numpy as np
 
@@ -110,7 +110,7 @@ def runall(train_dataset,
     emit["dataset"] = DATASET
     emit["encoding"] = ENCODING
     emit["device"] = device
-    emit["truncate"] = TRUNCATE
+    emit["truncate"] = NCOL # == TRUNCATE unless 0, in which case == ncolors
     print(emit)
 
     device = torch.device(device)

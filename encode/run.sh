@@ -12,8 +12,8 @@
 # noting the prefix.
 #
 # Expects S3ROOT, DATASETS, ENCODINGS, TRUNCATES to be set.
-# Assumes that all ${dataset}.tar files
-# are present in clean/data already.
+# Assumes that all ${dataset}.tar files are present in clean/data already.
+# Same goes for ${dataset}.graph in graph/data.
 #
 # The different ENCODINGS supported are
 #
@@ -42,6 +42,13 @@ for dataset in $DATASETS ; do
                 continue
             fi
             if ! cache_read ${encoding}_${truncate}_${dataset}.tar ; then
+                to_get="${to_get}${dataset}.${encoding}.${truncate} "
+            elif [ "$1" = "--force" ] ; then
+                if [ -f "encode/data/${encoding}_${truncate}_${dataset}.tar" ] ; then
+                    cmd="mv encode/data/${encoding}_${truncate}_${dataset}.tar /tmp"
+                    echo "--force: $cmd"
+                fi 
+                $cmd
                 to_get="${to_get}${dataset}.${encoding}.${truncate} "
             fi
         done
@@ -104,7 +111,7 @@ for dataset_encoding_truncate in $to_get ; do
             test=$(echo "$all" | grep test)
             k=1
             cargo build -p crank --release --example greedy >/dev/null 2>&1
-            target/release/examples/greedy --train $train --test $test --k "$k" --ncolors "$truncate" > encode/data/${dataset_encoding_truncate}.jsonl
+            target/release/examples/greedy --graph graph/data/${dataset}.graph --train $train --test $test --k "$k" --ncolors "$truncate" > encode/data/${dataset_encoding_truncate}.jsonl
             find encode/data/ -maxdepth 1 -type f -regextype posix-extended -regex \
                  "^encode/data/${dataset}."'(train|test)\.svm\.[0-9]+$' -delete
             

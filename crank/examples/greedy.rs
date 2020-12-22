@@ -13,7 +13,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde_json::json;
 use structopt::StructOpt;
 
-use crank::{color, simsvm, Scanner, SummaryStats};
+use crank::{color, graphio, simsvm, Scanner, SummaryStats};
 
 /// Reads utf-8 text files in simsvm format. "simplified svmlight" format.
 ///
@@ -32,7 +32,7 @@ use crank::{color, simsvm, Scanner, SummaryStats};
 /// The transformation is done for both train and test files, but
 /// only train files are used to construct the graph.
 #[derive(Debug, StructOpt)]
-#[structopt(name = "greedy", about = "Recoding a list of files with map.")]
+#[structopt(name = "greedy", about = "Perform chromatic encoding.")]
 struct Opt {
     /// Training files to use for coloring and transformation.
     #[structopt(long)]
@@ -42,6 +42,10 @@ struct Opt {
     #[structopt(long)]
     test: Vec<PathBuf>,
 
+    /// Co-occurrence graph with edge weights, should be pre-computed.
+    #[structopt(long)]
+    graph: PathBuf,
+
     /// Minimum edge weight `k` for use in coloring. Must be at least 1.
     #[structopt(long)]
     k: u32,
@@ -50,6 +54,10 @@ struct Opt {
     /// coloring requires more.
     #[structopt(long)]
     ncolors: u32,
+
+    /// Use this many samples for glauber coloring
+    #[structopt(long, default_value = "10000000")]
+    nsamples: usize,
 }
 
 fn main() {
@@ -70,29 +78,40 @@ fn main() {
         })
     );
 
-    let csr_start = Instant::now();
-    let csr = simsvm::csr(&scanner, &train_stats);
-    println!(
-        "{}",
-        json!({ "csr_duration": format!("{:.0?}", Instant::now().duration_since(csr_start)) })
-    );
-
-    let colors_start = Instant::now();
-    let (colors, remap) = color::greedy(&csr, opt.k);
+    let load_graph_start = Instant::now();
+    let graph_scanner = Scanner::new(vec![opt.graph], b' ');
+    let graph = graphio::read(&graph_scanner, train_stats.nfeatures(), opt.k);
     println!(
         "{}",
         json!({
-            "ncolors": compute_ncolors(&colors),
+            "load_graph_duration":
+                format!("{:.0?}", Instant::now().duration_since(load_graph_start))
+        })
+    );
+
+    let colors_start = Instant::now();
+    let (ncolors, colors) = if opt.ncolors == 0 {
+        color::greedy(&graph)
+    } else {
+        color::glauber(&graph, opt.ncolors, opt.nsamples)
+    };
+    let remap = color::remap(ncolors, &colors);
+    println!(
+        "{}",
+        json!({
+            "ncolors": ncolors,
             "color_cardinalities": compute_color_cardinalities(&colors, &remap),
             "colors_duration": format!("{:.0?}", Instant::now().duration_since(colors_start)),
+            "glauber": opt.ncolors > 0,
+
         })
     );
 
     let encode_start = Instant::now();
     // TODO: collision stats
-    encode(&colors, &remap, &scanner, opt.k);
+    encode(ncolors, &colors, &remap, &scanner);
 
-    // TODO: timings for test stats, encode, collision stats
+    // TODO: test collision stats
     let scanner = Scanner::new(opt.test, b' ');
     let test_start = Instant::now();
     let test_stats = simsvm::stats(&scanner);
@@ -107,18 +126,7 @@ fn main() {
             "stats_duration": format!("{:.0?}", Instant::now().duration_since(test_start)),
         })
     );
-    encode(&colors, &remap, &scanner, opt.k);
-}
-
-fn compute_ncolors(colors: &[u32]) -> u32 {
-    colors
-        .iter()
-        .copied()
-        .max()
-        .map(|x| x + 1)
-        .unwrap_or(0)
-        .try_into()
-        .unwrap()
+    encode(ncolors, &colors, &remap, &scanner);
 }
 
 /// Returns a set of summary statistics over the cardinality (number of features)
@@ -135,8 +143,8 @@ fn compute_color_cardinalities(colors: &[u32], remap: &[u32]) -> HashMap<String,
     SummaryStats::from(cards.values().map(|x| *x as f64)).to_map()
 }
 
-fn encode(colors: &[u32], remap: &[u32], scanner: &Scanner, k: u32) {
-    let ncolors = compute_ncolors(colors) as usize;
+fn encode(ncolors: u32, colors: &[u32], remap: &[u32], scanner: &Scanner) {
+    let ncolors = ncolors as usize;
     scanner.for_each_sink(
         vec![u32::MAX; ncolors],
         |line, writer, new_features| {

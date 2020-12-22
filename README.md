@@ -47,6 +47,7 @@ export CUDA_VISIBLE_DEVICES=0
 | --- | --- |
 | `bash raw/run.sh` | download raw datasets |
 | `bash clean/run.sh` | clean datasets |
+| `bash graph/run.sh` | generate co-occurrence graphs |
 | `bash encode/run.sh` | encode datasets with specified encodings |
 | `bash nn/run.sh` | neural net train/test on encoded datasets |
 | `bash wabbit/run.sh` | vowpal wabbit train/test on clean datasets |
@@ -54,3 +55,5 @@ export CUDA_VISIBLE_DEVICES=0
 `wabbit/run.sh` allows datasets of the form `${encoding}_${truncate}_${dataset}`, e.g., `ce_1000_url` for debug purposes.
 
 For most GPUs, I would not recommend setting any `TRUNCATES` over `100000`.
+
+Looks like this re-implements Metaflow, basically. Whoops.

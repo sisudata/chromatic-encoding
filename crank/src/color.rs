@@ -16,30 +16,98 @@ use rayon::iter::{
 };
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
-use crate::SparseMatrix;
+use crate::{graph::Graph, graph::Vertex, SparseMatrix};
 
-/// Returns `(colors, remap)` for each feature of the input dataset
-/// as a vertical stack of the `csr` matrices, after applying the chromatic encoding
-/// greedily (using the online coloring for features in the natural ordering defined by the
-/// feature index).
+/// Given the training set, a color mapping, and the number of colors,
+/// "remaps" a dataset, generating a vector `remap` such that `remap[f]`
+/// is `f`s rank among all features it shares a color with, 1-indexed.
 ///
-/// `remap` 1-indexes features with the same color.
-pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
-    // At a high level, we color a graph where the vertices are features and edges exist between
-    // features which co-occurr at least `k` times. This graph is colored by an online serial
-    // algorithm which receives adjacency information from every vertex to all previously explored
-    // vertices.
-    //
-    // Adjacency information is communicated via collision counts, where a collision between
-    // two features is a row where they co-occurr.
-    //
-    // We can parallelize the collision counting, even if the coloring algorithm is serial,
-    // by counting collisions for several few vertices at a time.
-    //
-    // There's a fancy way of doing this via par_bridge, but that requires re-entrant
-    // mutexes to serialize rayon tasks at the consumer side and is generally too messy.
-    // Dumber chunk-based parallelism is easier, which is what's implemented below.
+/// I.e., the lowest-numbered feature for a given color will have a `remap`
+/// of 1, the second lowest numbered, 2, and so on.
+pub fn remap(ncolors: u32, colors: &[u32]) -> Vec<u32> {
+    let mut color_counts = vec![0u32; ncolors as usize];
+    let mut remap = vec![0u32; colors.len()];
+    colors.iter().copied().enumerate().for_each(|(f, c)| {
+        color_counts[c as usize] += 1;
+        remap[f as usize] = color_counts[c as usize]
+    });
 
+    remap
+}
+
+/// Returns `(ncolors, colors)` for a max-degree-ordered coloring of the graph.
+pub fn greedy(graph: &Graph) -> (u32, Vec<u32>) {
+    let nvertices = graph.nvertices();
+    let mut vertices: Vec<_> = (0..nvertices).map(|v| v as Vertex).collect();
+    vertices.sort_unstable_by_key(|&v| graph.degree(v));
+
+    const NO_COLOR: u32 = std::u32::MAX;
+    let mut colors: Vec<u32> = vec![NO_COLOR; nvertices];
+    let mut adjacent_colors: Vec<bool> = Vec::new();
+
+    for vertex in vertices.into_iter().rev() {
+        // loop invariant is that none of adjacent_colors elements are true
+
+        // what color are our neighbors?
+        let mut nadjacent_colors = 0;
+        for &n in graph.neighbors(vertex) {
+            let n = n as usize;
+            if colors[n] == NO_COLOR {
+                continue;
+            }
+
+            let c = colors[n] as usize;
+            if !adjacent_colors[c] {
+                adjacent_colors[c] = true;
+                nadjacent_colors += 1;
+                if nadjacent_colors == colors.len() {
+                    break;
+                }
+            }
+        }
+
+        // what's the smallest color not in our neighbors?
+        let chosen = if nadjacent_colors == adjacent_colors.len() {
+            adjacent_colors.push(false);
+            adjacent_colors.len() - 1
+        } else {
+            adjacent_colors.iter().copied().position(|x| !x).unwrap()
+        };
+        colors[vertex as usize] = chosen as u32;
+
+        // retain loop invariant, unset neighbor colors
+        if graph.degree(vertex) >= adjacent_colors.len() {
+            graph
+                .neighbors(vertex)
+                .iter()
+                .map(|&n| colors[n as usize])
+                .filter(|&n| n != NO_COLOR)
+                .for_each(|c| {
+                    adjacent_colors[c as usize] = false;
+                });
+        } else {
+            for c in adjacent_colors.iter_mut() {
+                *c = false;
+            }
+        }
+    }
+
+    (adjacent_colors.len() as u32, colors)
+}
+
+/// Returns `(ncolors, colors)` for a Glauber-colored graph. If greedy colors
+/// requires more colors than specified, then increases the color count to that many.
+pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) {
+    unimplemented!()
+    // implement parallel monte carlo with *SORTED* neighbors
+    // make neighbors atomic u64s
+}
+
+// TODO impl greedy() and glauber()
+// print collision stats in greedy.rs
+// try to improve glauber with paralell mcmcm
+
+/*
     let nfeatures = csr[0].cols();
     let mut greedy = OnlineGreedy::init(nfeatures);
 
@@ -107,7 +175,6 @@ pub fn greedy(csr: &[SparseMatrix], k: u32) -> (Vec<u32>, Vec<u32>) {
         }
     }
 
-    outer.finish_and_clear();
     assert!(greedy.current == greedy.nfeatures);
     (greedy.colors, greedy.remap)
 }
@@ -177,3 +244,4 @@ impl OnlineGreedy {
         self.current += 1;
     }
 }
+*/

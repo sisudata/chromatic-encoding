@@ -140,6 +140,22 @@ impl Scanner {
         })
     }
 
+    /// As above but serial.
+    pub(crate) fn fold_serial<'a, U, Fold>(&'a self, id: U, mut fold: Fold) -> U
+    where
+        Fold: FnMut(U, DelimIter<'_>) -> U,
+    {
+        let delim = self.delimiter;
+        let path = self.paths.first().unwrap();
+        let file = File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
+        let reader = BufReader::with_capacity(BUFSIZE, file);
+        reader.split(b'\n').fold(id, |acc, line| {
+            let line = line.expect("line read");
+            let words = DelimIter::new(&line, delim);
+            fold(acc, words)
+        })
+    }
+
     /*
     /// Loop over each line in parallel; rely on function side effects and shared,
     /// synchronized state to extract information.

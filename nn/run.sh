@@ -47,12 +47,7 @@ for dataset_encoding_truncate_modelname in $to_get ; do
     tar xf nn/data/${dataset_encoding_truncate}.bin.tar -C nn/data
     rm nn/data/${dataset_encoding_truncate}.bin.tar
 
-    if [[ $truncate -eq 0 ]]; then
-        true_truncate=$(grep "ncolors" nn/data/${dataset_encoding_truncate}.jsonl | head -1 | jq .ncolors)
-    else
-        true_truncate="$truncate"
-    fi
-    DATASET="${dataset}" ENCODING="${encoding}" TRUNCATE="${true_truncate}" MODELNAME="${modelname}" python \
+    DATASET="${dataset}" ENCODING="${encoding}" TRUNCATE="${truncate}" MODELNAME="${modelname}" python \
            -m nn.run \
            nn/data/${dataset_encoding_truncate}.train.{data,indices,indptr,y} \
            nn/data/${dataset_encoding_truncate}.test.{data,indices,indptr,y} \

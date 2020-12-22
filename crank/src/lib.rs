@@ -8,6 +8,8 @@ use ordered_float::NotNan;
 use sprs::CsMatI;
 
 pub mod color;
+pub mod graph;
+pub mod graphio;
 mod scanner;
 pub mod simsvm;
 pub mod svmlight;
