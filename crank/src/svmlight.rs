@@ -80,7 +80,7 @@ pub fn csr(scanner: &Scanner) -> SparseMatrixComponents {
     bigbin
 }
 
-pub fn parse<'a>(mut iter: DelimIter<'a>) -> SvmlightLineIter<'a> {
+pub fn parse(mut iter: DelimIter<'_>) -> SvmlightLineIter<'_> {
     let target = iter.next().expect("target");
     SvmlightLineIter { target, iter }
 }

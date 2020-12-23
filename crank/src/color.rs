@@ -1,22 +1,11 @@
 //! The core coloring functionality for sparse datasets represented
 //! as pages of sparse matrices.
 
-use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
-
-
-
-
-
-
-
 use std::time::Instant;
 
-
+use rand::Rng;
 use rand_pcg::Lcg64Xsh32;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, ParallelIterator,
-};
-
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde_json::json;
 
 use crate::{
@@ -134,10 +123,7 @@ pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) 
     // run glauber markov chain on a coloring
     // chain sampling can be parallel with some simple conflict detection
 
-    let colors = colors
-        .into_iter()
-        .map(Rwu32::new)
-        .collect::<Vec<_>>();
+    let colors = colors.into_iter().map(Rwu32::new).collect::<Vec<_>>();
     let nthreads = rayon::current_num_threads() as usize;
 
     let glauber_start = Instant::now();

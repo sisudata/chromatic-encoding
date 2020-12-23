@@ -109,7 +109,7 @@ struct PageStats {
     nnz: usize,
 }
 
-pub fn parse<'a>(mut iter: DelimIter<'a>) -> SimSvmLineIter<'a> {
+pub fn parse(mut iter: DelimIter<'_>) -> SimSvmLineIter<'_> {
     let target = iter.next().expect("target");
     SimSvmLineIter { target, iter }
 }

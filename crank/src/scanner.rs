@@ -26,7 +26,7 @@ pub struct DelimIter<'a> {
 }
 
 impl<'a> DelimIter<'a> {
-    pub fn new<'b>(bytes: &'b [u8], delim: u8) -> DelimIter<'b> {
+    pub fn new(bytes: &[u8], delim: u8) -> DelimIter<'_> {
         DelimIter {
             bytes,
             pos: 0,

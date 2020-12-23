@@ -27,7 +27,7 @@ impl Rwu32 {
     }
 
     /// Attempt to acquire a write lock.
-    pub fn try_write_lock<'a>(&'a self) -> Option<WriteGuard<'a>> {
+    pub fn try_write_lock(&self) -> Option<WriteGuard<'_>> {
         let prev = self.inner.fetch_or(WRITE_BIT_MASK, Ordering::Relaxed);
         match State::from(prev) {
             State::RunlockedWlocked | State::RlockedWlocked => {
@@ -51,7 +51,7 @@ impl Rwu32 {
     /// Attempt to acquire a read lock and simultaneously read the current
     /// value. As long as the read lock is held the value is guaranteed not to
     /// change.
-    pub fn try_read_lock<'a>(&'a self) -> Option<(u32, ReadGuard<'a>)> {
+    pub fn try_read_lock(&self) -> Option<(u32, ReadGuard<'_>)> {
         let prev = self.inner.fetch_add(1, Ordering::Relaxed);
         match State::from(prev) {
             State::RunlockedWlocked | State::RlockedWlocked => {
@@ -136,14 +136,14 @@ impl<'a> Drop for WriteGuard<'a> {
             debug_assert!(diff > (1 << 31));
             diff -= 1 << 31;
             let result = self.rwu32.inner.fetch_add(diff, Ordering::Relaxed);
-            debug_assert!(result & WRITE_BIT_MASK == 1);
+            debug_assert!(result & WRITE_BIT_MASK > 0);
             debug_assert!(from_payload(result) == self.previous);
         } else {
             // similarly, delete the extra write lock bit
             let mut diff = to_payload(self.previous - self.current);
             diff += 1 << 31;
             let result = self.rwu32.inner.fetch_sub(diff, Ordering::Relaxed);
-            debug_assert!(result & WRITE_BIT_MASK == 1);
+            debug_assert!(result & WRITE_BIT_MASK > 0);
             debug_assert!(from_payload(result) == self.previous);
         }
     }
