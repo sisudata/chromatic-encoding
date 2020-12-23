@@ -62,7 +62,7 @@ def train(model, optimizer, data_loader, criterion, device, epoch_name, disable_
     total_loss = 0
     nex = 0
     t = time()
-    for i, (fields, target) in enumerate(tqdm.tqdm(data_loader, desc=epoch_name, leave=False, disable=(disable_tqdm or None))):
+    for i, (fields, target) in enumerate(tqdm.tqdm(data_loader, ncols=80, desc=epoch_name, leave=False, disable=(disable_tqdm or None))):
         fields, target = fields.to(device), target.to(device)
         y = model(fields)
         loss = criterion(y, target.float())
@@ -82,7 +82,7 @@ def test(model, data_loader, device, disable_tqdm=False):
     model.eval()
     targets, predicts = list(), list()
     with torch.no_grad():
-        for fields, target in tqdm.tqdm(data_loader, desc='eval', leave=False, disable=(disable_tqdm or None)):
+        for fields, target in tqdm.tqdm(data_loader, ncols=80, desc='eval', leave=False, disable=(disable_tqdm or None)):
             fields, target = fields.to(device), target.to(device)
             y = model(fields)
             targets.extend(target.tolist())
