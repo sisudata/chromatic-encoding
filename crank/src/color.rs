@@ -2,29 +2,27 @@
 //! as pages of sparse matrices.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::iter;
-use std::mem;
-use std::sync::atomic;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Condvar, Mutex};
+
+
+
+
+
+
+
 use std::time::Instant;
 
-use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
+
 use rand_pcg::Lcg64Xsh32;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, ParallelIterator,
 };
-use rayon::slice::{ParallelSlice, ParallelSliceMut};
+
 use serde_json::json;
 
 use crate::{
     atomic_rw::{ReadGuard, Rwu32},
     graph::Graph,
     graph::Vertex,
-    SparseMatrix,
 };
 
 /// Given the training set, a color mapping, and the number of colors,
@@ -138,7 +136,7 @@ pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) 
 
     let colors = colors
         .into_iter()
-        .map(|x| Rwu32::new(x))
+        .map(Rwu32::new)
         .collect::<Vec<_>>();
     let nthreads = rayon::current_num_threads() as usize;
 

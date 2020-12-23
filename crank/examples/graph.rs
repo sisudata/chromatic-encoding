@@ -1,13 +1,13 @@
 //! Generates a feature co-occurrence graph from a dataset.
 
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::io::Write;
+
+
+
 use std::path::PathBuf;
 use std::time::Instant;
-use std::u32;
 
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+use rayon::iter::{ParallelIterator};
 use serde_json::json;
 use structopt::StructOpt;
 

@@ -1,13 +1,13 @@
 //! Compact graph data structure.
 
-use itertools::EitherOrBoth::{Both, Right};
-use itertools::Itertools;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
-use std::convert::TryInto;
-use std::iter;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+
+
+use rayon::iter::{ParallelIterator};
+
+
+
+
+
 
 use rayon::iter::IndexedParallelIterator;
 use rayon::slice::ParallelSlice;
@@ -33,7 +33,7 @@ impl Graph {
             s[0] < s[1]
                 && neighbors[s[0]..s[1]].windows(2).all(|ss| ss[0] < ss[1])
                 && neighbors[s[0]..s[1]].iter().copied().all(|j| {
-                    let ref i = i as u32;
+                    let i = &(i as u32);
                     neighbors[offsets[j as usize]..offsets[1 + j as usize]]
                         .binary_search(i)
                         .is_ok()

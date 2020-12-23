@@ -3,13 +3,13 @@
 //! features encoding the chromatic encoding defined by the coloring.
 
 use std::collections::HashMap;
-use std::convert::TryInto;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 use std::u32;
 
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{ParallelIterator};
 use serde_json::json;
 use structopt::StructOpt;
 
@@ -114,7 +114,7 @@ fn main() {
         })
     );
 
-    let encode_start = Instant::now();
+    let _encode_start = Instant::now();
     // TODO: collision stats
     encode(ncolors, &colors, &remap, &scanner);
 

@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::Write;
-use std::io::{BufRead, BufReader, BufWriter};
+use std::io::{BufWriter};
 use std::iter;
-use std::mem;
+
 use std::path::PathBuf;
-use std::sync::atomic;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex};
+
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
 use std::time::Instant;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
@@ -18,7 +18,7 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
 };
-use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use rayon::slice::{ParallelSliceMut};
 use serde_json::json;
 
 use crate::{graph::Graph, svmlight, Scanner, SparseMatrix};

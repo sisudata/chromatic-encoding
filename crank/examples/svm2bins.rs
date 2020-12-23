@@ -1,18 +1,18 @@
 //! I had to write this b/c python svmlight parsing is so damn slow.
 //! Converts svmlight files into a binary encoding of a CSR matrix.
 
-use std::collections::HashMap;
-use std::convert::TryInto;
+
+
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
-use std::u32;
+
+
 
 use byte_slice_cast::AsByteSlice;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use serde_json::json;
+use rayon::iter::{ParallelIterator};
+
 use structopt::StructOpt;
 
 use crank::{color, svmlight, Scanner, SummaryStats};

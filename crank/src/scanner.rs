@@ -39,7 +39,7 @@ impl<'a> DelimIter<'a> {
     pub(crate) fn dbg_line(&self) -> String {
         let clone = self.clone();
         clone
-            .map(|w| format!("{}", std::str::from_utf8(w).unwrap_or("<BAD-UTF8>")))
+            .map(|w| std::str::from_utf8(w).unwrap_or("<BAD-UTF8>").to_string())
             .collect::<Vec<_>>()
             .join(" ")
     }
