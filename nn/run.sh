@@ -56,6 +56,6 @@ for dataset_encoding_truncate_modelname in $to_get ; do
     rm nn/data/${dataset_encoding_truncate}.{train,test}.{data,indices,indptr,y}
     rm nn/data/${dataset_encoding_truncate}.jsonl
 
-    cache_write nn/data/${dataset_encoding_truncate_modelname}.log
-    cache_write nn/data/${dataset_encoding_truncate_modelname}.json
+    cache_write ${dataset_encoding_truncate_modelname}.log
+    cache_write ${dataset_encoding_truncate_modelname}.json
 done

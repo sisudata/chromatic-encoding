@@ -28,11 +28,9 @@ function cache_read {
 export -f cache_read
 
 function cache_write {
-    # TODO: $1 expected to be absolute rather than run from repo root
-    # inconsistent with cache_read
-    local base=$(basename "$1")
+    local fsfile="$DIRPREFIX/data/$1"
     local s3file="$S3ROOT/$DIRPREFIX/$base"
-    aws s3 cp "$1" "$s3file"
+    aws s3 cp "$fsfile" "$s3file"
 }
 
 export -f cache_write

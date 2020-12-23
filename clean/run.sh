@@ -88,7 +88,8 @@ for dataset in $to_get ; do
         | tr ' ' '\n' \
         | parallel --will-cite 'zstd -q {} -o {}.zst && rm {} && echo {}.zst')
     tar cf ${dataset}.tar $all
-    rm $all clean/data/${dataset}.{train,test}.original.svm
-    cache_write ${dataset}.tar
+    rm $all ${dataset}.{train,test}.original.svm
     popd >/dev/null
+
+    cache_write ${dataset}.tar
 done

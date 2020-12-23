@@ -153,6 +153,6 @@ for dataset_encoding_truncate in $to_get ; do
         ${dataset_encoding_truncate}.bin.tar.zst
     popd >/dev/null
     
-    cache_write encode/data/${encoding}_${truncate}_${dataset}.tar    
+    cache_write ${encoding}_${truncate}_${dataset}.tar    
 done
 

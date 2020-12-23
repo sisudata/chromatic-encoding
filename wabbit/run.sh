@@ -66,8 +66,8 @@ for dataset in $to_get ; do
     echo '}' >> wabbit/data/${dataset}.json
     rm wabbit/data/${dataset}.{train,test}.{pred,label}
 
-    cache_write wabbit/data/${dataset}.json
-    cache_write wabbit/data/${dataset}.train.log
-    cache_write wabbit/data/${dataset}.test.log
-    cache_write wabbit/data/${dataset}.model
+    cache_write ${dataset}.json
+    cache_write ${dataset}.train.log
+    cache_write ${dataset}.test.log
+    cache_write ${dataset}.model
 done

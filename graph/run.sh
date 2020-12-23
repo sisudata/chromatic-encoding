@@ -60,6 +60,6 @@ for dataset in $to_get ; do
               | parallel --will-cite -0 'zstd --rm -q {} && basename {}.zst')
     tar cf graph/data/${dataset}.graph.tar -C graph/data --remove-files $all ${dataset}.jsonl
 
-    cache_write graph/data/${dataset}.graph.tar
+    cache_write ${dataset}.graph.tar
 done
 

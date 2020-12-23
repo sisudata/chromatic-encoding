@@ -21,12 +21,16 @@ for url in $urls ; do
 done
 
 
-echo "$to_get" \
+to_get=$(echo "$to_get" \
     | tr ' ' '\n' \
     | xargs -r -P $(echo "$to_get" | wc -l) -L 1 bash -c '
 base=$(basename "$1")
 wget -q -O raw/data/$base "$1"
-cache_write raw/data/$base
-' --
+echo $base
+' --)
+
+for base in $to_get ; do
+    cache_write $base
+done 
 
     
