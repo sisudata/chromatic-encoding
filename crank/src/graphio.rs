@@ -198,9 +198,9 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
         )
     };
 
-    let sort_start = Instant::now();
-    {
+    let (slice_build_time, sort_time) = {
         // fight the borrow checker
+        let slice_build_start = Instant::now();
         let mut head_and_tail = edges.split_at_mut(0);
         let mut neighbor_lists = Vec::with_capacity(offsets.len() - 1);
         for s in offsets.windows(2) {
@@ -208,11 +208,14 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
             head_and_tail = head_and_tail.1.split_at_mut(next_chunk);
             neighbor_lists.push(head_and_tail.0);
         }
+        let slice_build_time = format!("{:.0?}", Instant::now().duration_since(slice_build_start));
+        let sort_start = Instant::now();
         neighbor_lists
             .par_iter_mut()
             .for_each(|s| s.sort_unstable());
-    }
-    let sort_time = format!("{:.0?}", Instant::now().duration_since(sort_start));
+        let sort_time = format!("{:.0?}", Instant::now().duration_since(sort_start));
+        (slice_build_time, sort_time)
+    };
 
     println!(
         "{}",
@@ -220,6 +223,7 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
             "sort_time": sort_time,
             "edge_time": edge_time,
             "offset_time": offset_time,
+            "slice_build_time": slice_build_time,
         })
     );
 

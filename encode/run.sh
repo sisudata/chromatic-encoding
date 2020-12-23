@@ -102,7 +102,6 @@ for dataset_encoding_truncate in $to_get ; do
             
             ;;
         ce)
-            echo "${dataset}" "${encoding}"
             train=$(echo "$all" | grep train)
             test=$(echo "$all" | grep test)
             k=1
@@ -112,7 +111,7 @@ for dataset_encoding_truncate in $to_get ; do
                            "encode/data/${dataset}."'graph\.[0-9]+.zst' -print0 \
                           | parallel --will-cite -0 'zstd -f -d --rm -q {} && echo "encode/data/$(basename {} .zst)"' )            
             cargo build -p crank --release --example greedy >/dev/null 2>&1
-            target/release/examples/greedy --graph $graphs --train $train --test $test --k "$k" --ncolors "$truncate" | tee encode/data/${dataset_encoding_truncate}.jsonl
+            target/release/examples/greedy --graph $graphs --train $train --test $test --k "$k" --ncolors "$truncate" > encode/data/${dataset_encoding_truncate}.jsonl
             rm $graphs
             find encode/data/ -maxdepth 1 -type f -regextype posix-extended -regex \
                  "^encode/data/${dataset}."'(train|test)\.svm\.[0-9]+$' -delete

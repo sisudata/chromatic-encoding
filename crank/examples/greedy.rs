@@ -55,8 +55,11 @@ struct Opt {
     #[structopt(long)]
     ncolors: u32,
 
-    /// Use this many samples for glauber coloring
-    #[structopt(long, default_value = "10000000")]
+    /// Use this many samples for glauber coloring. If 0, then set to
+    /// `2 * v * ceil(log(v))` where `v` is the number of vertices (features) in the
+    /// co-occurrence graph. This is just a simple heuristic based on the
+    /// coupon collector's problem.
+    #[structopt(long, default_value = "0")]
     nsamples: usize,
 }
 
@@ -93,7 +96,12 @@ fn main() {
     let (ncolors, colors) = if opt.ncolors == 0 {
         color::greedy(&graph)
     } else {
-        color::glauber(&graph, opt.ncolors, opt.nsamples)
+        let nsamples = if opt.nsamples == 0 {
+            2 * graph.nvertices() * 1.max((graph.nvertices() as f64).ln() as usize)
+        } else {
+            opt.nsamples
+        };
+        color::glauber(&graph, opt.ncolors, nsamples)
     };
     let remap = color::remap(ncolors, &colors);
     println!(

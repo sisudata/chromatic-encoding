@@ -178,10 +178,11 @@ pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) 
     println!(
         "{}",
         json!({
-            "greedy_ncolors": greedy_ncolors as f64,
-            "nsamples": nsamples as f64,
-            "conflicts": conflicts as f64,
-            "nthreads": nthreads as f64,
+            "greedy_ncolors": greedy_ncolors,
+            "glauber_ncolors": ncolors,
+            "nsamples": nsamples,
+            "conflicts": conflicts,
+            "nthreads": nthreads,
             "conflict_percent": 100.0 * conflicts as f64 / (nsamples + conflicts) as f64,
             "glauber_time": format!("{:.0?}", glauber_time),
         })

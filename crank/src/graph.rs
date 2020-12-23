@@ -56,7 +56,7 @@ impl Graph {
         hi - lo
     }
 
-    pub(crate) fn nvertices(&self) -> usize {
+    pub fn nvertices(&self) -> usize {
         self.offsets.len() - 1
     }
 }
