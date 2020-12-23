@@ -44,7 +44,7 @@ struct Opt {
 
     /// Co-occurrence graph with edge weights, should be pre-computed.
     #[structopt(long)]
-    graph: PathBuf,
+    graph: Vec<PathBuf>,
 
     /// Minimum edge weight `k` for use in coloring. Must be at least 1.
     #[structopt(long)]
@@ -79,7 +79,7 @@ fn main() {
     );
 
     let load_graph_start = Instant::now();
-    let graph_scanner = Scanner::new(vec![opt.graph], b' ');
+    let graph_scanner = Scanner::new(opt.graph, b' ');
     let graph = graphio::read(&graph_scanner, train_stats.nfeatures(), opt.k);
     println!(
         "{}",
@@ -88,6 +88,10 @@ fn main() {
                 format!("{:.0?}", Instant::now().duration_since(load_graph_start))
         })
     );
+    // TODO: above needs speedup (try CHUNK=10k).
+    // Print finer grained json (log_info below) inside methods
+    // themselves, including load_graph
+    // **run TRUNCATES 1000 NEURAL nets for spot check on ce**
 
     let colors_start = Instant::now();
     let (ncolors, colors, log_info) = if opt.ncolors == 0 {

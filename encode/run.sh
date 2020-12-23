@@ -13,7 +13,7 @@
 #
 # Expects S3ROOT, DATASETS, ENCODINGS, TRUNCATES to be set.
 # Assumes that all ${dataset}.tar files are present in clean/data already.
-# Same goes for ${dataset}.graph in graph/data.
+# Same goes for ${dataset}.graph.tar in graph/data.
 #
 # The different ENCODINGS supported are
 #
@@ -110,8 +110,14 @@ for dataset_encoding_truncate in $to_get ; do
             train=$(echo "$all" | grep train)
             test=$(echo "$all" | grep test)
             k=1
+
+            tar xf graph/data/${dataset}.graph.tar -C encode/data/
+            graphs=$( find encode/data -maxdepth 1 -type f -regextype posix-extended -regex \
+                           "encode/data/${dataset}."'graph\.[0-9]+.zst' -print0 \
+                          | parallel --will-cite -0 'zstd -f -d --rm -q {} && echo "encode/data/$(basename {} .zst)"' )            
             cargo build -p crank --release --example greedy >/dev/null 2>&1
-            target/release/examples/greedy --graph graph/data/${dataset}.graph --train $train --test $test --k "$k" --ncolors "$truncate" | tee encode/data/${dataset_encoding_truncate}.jsonl
+            target/release/examples/greedy --graph $graphs --train $train --test $test --k "$k" --ncolors "$truncate" | tee encode/data/${dataset_encoding_truncate}.jsonl
+            rm $graphs
             find encode/data/ -maxdepth 1 -type f -regextype posix-extended -regex \
                  "^encode/data/${dataset}."'(train|test)\.svm\.[0-9]+$' -delete
             
@@ -147,11 +153,9 @@ for dataset_encoding_truncate in $to_get ; do
         --remove-files ${dataset_encoding_truncate}.{train,test}.{data,indices,indptr,y}
     zstd -q --rm ${dataset_encoding_truncate}.bin.tar -o ${dataset_encoding_truncate}.bin.tar.zst
 
-    tar cf ${encoding}_${truncate}_${dataset}.tar \
+    tar cf ${encoding}_${truncate}_${dataset}.tar --remove-files \
         $all \
         ${dataset_encoding_truncate}.bin.tar.zst
-    rm $all \
-       ${dataset_encoding_truncate}.bin.tar.zst
     popd >/dev/null
     
     cache_write encode/data/${encoding}_${truncate}_${dataset}.tar    

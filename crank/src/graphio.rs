@@ -9,7 +9,7 @@ use std::iter;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::atomic;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
@@ -86,7 +86,7 @@ pub fn write(csr: &[SparseMatrix], nvertices: usize, out: &PathBuf) -> (usize, f
                         };
 
                         for write_ix in lb..ub {
-                            for col_ix in &col_ixs[..lb] {
+                            for col_ix in &col_ixs[..write_ix] {
                                 *collisions[(col_ixs[write_ix] - lo_feat) as usize]
                                     .entry(*col_ix)
                                     .or_default() += 1;
@@ -123,37 +123,84 @@ pub fn write(csr: &[SparseMatrix], nvertices: usize, out: &PathBuf) -> (usize, f
 
 /// Reads a single file behind a scanner into an in-memory graph.
 pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph {
-    let mut offsets = scanner.fold_serial(vec![0usize; nvertices + 1], |mut degree, line| {
-        let line = svmlight::parse(line);
-        let target = line.target();
-        line.filter(|(_, weight)| *weight >= min_edge_weight)
-            .for_each(|(neighbor, _)| {
-                degree[1 + neighbor as usize] += 1;
-                degree[1 + target as usize] += 1;
-            });
-        degree
-    });
-    let mut cumsum = 0;
-    for offset in offsets.iter_mut() {
-        cumsum += *offset;
-        *offset = cumsum;
-    }
-    // technically double the number of edges
-    let nedges = offsets[offsets.len() - 1];
-    let mut positions = offsets.clone();
-    let edges = scanner.fold_serial(vec![0u32; nedges], move |mut edges, line| {
-        let line = svmlight::parse(line);
-        let target = line.target();
-        let neighbors = line
-            .filter(|(_, weight)| *weight >= min_edge_weight)
-            .map(|(neighbor, _)| neighbor);
-        for neighbor in neighbors {
-            edges[positions[target as usize]] = neighbor;
-            edges[positions[neighbor as usize]] = target;
-            positions[target as usize] += 1;
-            positions[neighbor as usize] += 1;
+    let (offsets, mut edges) = {
+        let mut atomic_offsets: Vec<_> = iter::repeat_with(|| AtomicUsize::new(0))
+            .take(nvertices + 1)
+            .collect();
+        scanner
+            .fold(
+                |_| (),
+                |_, line| {
+                    let line = svmlight::parse(line);
+                    let target = line.target();
+                    let neighbors = line
+                        .filter(|(_, weight)| *weight >= min_edge_weight)
+                        .map(|(neighbor, _)| neighbor);
+                    for neighbor in neighbors {
+                        atomic_offsets[1 + neighbor as usize].fetch_add(1, Ordering::Relaxed);
+                        atomic_offsets[1 + target as usize].fetch_add(1, Ordering::Relaxed);
+                    }
+                },
+            )
+            .collect::<()>();
+
+        let mut cumsum = 0;
+        for offset in atomic_offsets.iter_mut() {
+            cumsum += *offset.get_mut();
+            *offset.get_mut() = cumsum;
         }
-        edges
-    });
+        let offsets: Vec<usize> = atomic_offsets
+            .iter_mut()
+            .map(|offset| *offset.get_mut())
+            .collect();
+
+        // technically this is double the number of edges
+        let nedges = offsets[offsets.len() - 1];
+        let atomic_edges: Vec<_> = iter::repeat_with(|| AtomicU32::new(0))
+            .take(nedges)
+            .collect();
+        scanner
+            .fold(
+                |_| (),
+                |_, line| {
+                    let line = svmlight::parse(line);
+                    let target = line.target();
+                    let neighbors = line
+                        .filter(|(_, weight)| *weight >= min_edge_weight)
+                        .map(|(neighbor, _)| neighbor);
+                    for neighbor in neighbors {
+                        let target_ix =
+                            atomic_offsets[target as usize].fetch_add(1, Ordering::Relaxed);
+                        let neighbor_ix =
+                            atomic_offsets[neighbor as usize].fetch_add(1, Ordering::Relaxed);
+                        atomic_edges[target_ix].store(neighbor, Ordering::Relaxed);
+                        atomic_edges[neighbor_ix].store(target, Ordering::Relaxed);
+                    }
+                },
+            )
+            .collect::<()>();
+        (
+            offsets,
+            atomic_edges
+                .into_iter()
+                .map(|a| a.into_inner())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    {
+        // fight the borrow checker
+        let mut head_and_tail = edges.split_at_mut(0);
+        let mut neighbor_lists = Vec::with_capacity(offsets.len() - 1);
+        for s in offsets.windows(2) {
+            let next_chunk = (s[1] - s[0]) as usize;
+            head_and_tail = head_and_tail.1.split_at_mut(next_chunk);
+            neighbor_lists.push(head_and_tail.0);
+        }
+        neighbor_lists
+            .par_iter_mut()
+            .for_each(|s| s.sort_unstable());
+    }
+
     Graph::new(offsets, edges)
 }

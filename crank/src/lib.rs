@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use ordered_float::NotNan;
 use sprs::CsMatI;
 
+mod atomic_rw;
 pub mod color;
 pub mod graph;
 pub mod graphio;

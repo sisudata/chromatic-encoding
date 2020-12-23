@@ -5,7 +5,7 @@
 # Expects S3ROOT, DATASETS to be set.
 #
 # For each dataset in DATASETS, creates chunked files locally, caching to S3:
-# ${dataset}.{train,test}{.original,}.svm.000
+# ${dataset}.{train,test}{.original,}.svm.0000
 # where the final number indicates chunk index (files are CHUNK-line chunked,
 # default 100k), and every set of chunked files is zstd-encoded and then
 # tarred into ${dataset}.tar.

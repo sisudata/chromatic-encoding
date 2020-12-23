@@ -80,42 +80,13 @@ impl Scanner {
         Self { paths, delimiter }
     }
 
-    /*
     /// Fold over the lines in the associated files to this scanner
     /// and combine the results.
     ///
     /// A (cloneable) one-pass iterator is provided over each line per `fold` invocation.
-    pub(crate) fn fold_reduce<'a, U, Id, Fold, Reduce>(
-        &'a self,
-        ref id: Id,
-        fold: Fold,
-        reduce: Reduce,
-    ) -> U
-    where
-        U: Send,
-        Id: Fn() -> U + Sync + Send,
-        Fold: Fn(U, DelimIter<'a>) -> U + Sync + Send,
-        Reduce: Fn(U, U) -> U + Sync + Send,
-    {
-        let delim = self.delimiter;
-        self.paths
-            .par_iter()
-            .enumerate()
-            .map(move |(i, path)| {
-                let file =
-                    File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
-                let reader = BufReader::with_capacity(BUFSIZE, file);
-                reader.split(b'\n').fold(id(), |acc, line| {
-                    let line = line.expect("line read");
-                    let words = DelimIter::new(&line, delim);
-                    fold(acc, words)
-                })
-            })
-            .reduce(id, reduce)
-    }*/
-
-    /// Similar to the above, but with the guarantee that every file
-    /// is folded over once and no reduction is performed.
+    ///
+    /// Fold is called with the guarantee that every file
+    /// is folded over once and a parallel iterator over the results is returned.
     ///
     /// The `id` function is passed the index of the file getting folded over.
     pub(crate) fn fold<'a, U, Id, Fold>(
@@ -139,49 +110,6 @@ impl Scanner {
             })
         })
     }
-
-    /// As above but serial.
-    pub(crate) fn fold_serial<'a, U, Fold>(&'a self, id: U, mut fold: Fold) -> U
-    where
-        Fold: FnMut(U, DelimIter<'_>) -> U,
-    {
-        let delim = self.delimiter;
-        let path = self.paths.first().unwrap();
-        let file = File::open(path).unwrap_or_else(|e| panic!("read file: {:?}\n{}", path, e));
-        let reader = BufReader::with_capacity(BUFSIZE, file);
-        reader.split(b'\n').fold(id, |acc, line| {
-            let line = line.expect("line read");
-            let words = DelimIter::new(&line, delim);
-            fold(acc, words)
-        })
-    }
-
-    /*
-    /// Loop over each line in parallel; rely on function side effects and shared,
-    /// synchronized state to extract information.
-    ///
-    /// A (cloneable) one-pass iterator is provided over each line per `apply` invocation.
-    ///
-    /// Finish consumes final state.
-    pub(crate) fn for_each<'a, U, Id, Apply, Finish>(
-        &'a self,
-        ref id: Id,
-        apply: Apply,
-        finish: Finish,
-    ) where
-        U: Send,
-        Id: Fn() -> U + Sync + Send,
-        Apply: Fn(&mut U, DelimIter<'a>) + Sync + Send,
-        Finish: Fn(&mut U) + Sync + Send,
-    {
-        self.blocks.par_iter().for_each(|block| {
-            let mut state = id();
-            for line in DelimIter::new(block.bytes(&self), b'\n') {
-                apply(&mut state, DelimIter::new(line, self.delimiter));
-            }
-            finish(&mut state)
-        });
-    }*/
 
     /// Map over lines in the associated files, writing to a sink for each file.
     ///
