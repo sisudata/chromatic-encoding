@@ -29,6 +29,10 @@ npm install -g relaxed-json
 
 All scripts are intended to be run from the repository root (the directory containing this `README.md` file). Environment variables set parameters for all scripts (though some scripts ignore some parameters which don't apply to them).
 
+Everything is S3-backed so if you need disk space you can remove each script's adjacent `data/*` files and
+re-running will fetch from S3 on-demand. Some of the scripts support `--force` which will move old data
+files to `/tmp` locally and some `old/` folder in S3 before continuing.
+
 * All scripts read and write to S3 to cache intermediate data if not available on the local FD, using prefix `S3ROOT` which must be set as an environment variable.
 * `DATASETS` defines which datasets to operate on, and should be a space-delimited string containing words `urltoy url kdda kddb kdd12`.
 * `ENCODINGS` specifies the different encodings to try, `ft` (feature truncation) or `ce` (chromatic encoding). The table below summarizes what each script does. TODO: ht encoding
@@ -38,7 +42,7 @@ All scripts are intended to be run from the repository root (the directory conta
 ```
 export S3ROOT="s3://sisu-datasets/ce-build"
 export DATASETS="urltoy url kdda kddb kdd12"
-export ENCODINGS="ft weight"
+export ENCODINGS="ft ce"
 export TRUNCATES="1000 10000"
 export CUDA_VISIBLE_DEVICES=0
 ```
@@ -48,7 +52,7 @@ export CUDA_VISIBLE_DEVICES=0
 | `bash raw/run.sh` | download raw datasets |
 | `bash clean/run.sh` | clean datasets |
 | `bash graph/run.sh` | generate co-occurrence graphs |
-| `bash encode/run.sh` | encode datasets with specified encodings |
+| `bash encode/run.sh` | encode datasets up to prescribed dimension |
 | `bash nn/run.sh` | neural net train/test on encoded datasets |
 | `bash wabbit/run.sh` | vowpal wabbit train/test on clean datasets |
 

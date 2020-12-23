@@ -30,12 +30,7 @@ for dataset in $DATASETS ; do
         to_get="${to_get}${dataset} "
     elif [ "$1" = "--force" ] ; then
         for f in ${dataset}.json ${dataset}.train.log ${dataset}.test.log ${dataset}.model ; do
-            f="wabbit/data/$f"
-            if [ -f "$f" ] ; then
-                cmd="mv $f /tmp"
-                echo "--force: $cmd"
-            fi
-            $cmd
+            force "$f"
         done 
         to_get="${to_get}${dataset} "
     fi

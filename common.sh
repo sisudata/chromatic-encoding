@@ -28,6 +28,8 @@ function cache_read {
 export -f cache_read
 
 function cache_write {
+    # TODO: $1 expected to be absolute rather than run from repo root
+    # inconsistent with cache_read
     local base=$(basename "$1")
     local s3file="$S3ROOT/$DIRPREFIX/$base"
     aws s3 cp "$1" "$s3file"
@@ -42,3 +44,21 @@ function seeded_random {
   openssl enc -aes-256-ctr -pass pass:"$seed" -nosalt \
     </dev/zero 2>/dev/null
 }
+
+function force {
+    local fsfile="$DIRPREFIX/data/$1"
+    local s3file="$S3ROOT/$DIRPREFIX/$1"
+    if [ -f "$fsfile" ] ; then
+        cmd="mv $fsfile /tmp"
+        echo "--force: $cmd"
+        $cmd
+    fi
+    if aws s3 ls "$s3file" > /dev/null ; then
+        dt=$(TZ='America/Los_Angeles' date +"%F/%H")
+        cmd="aws s3 mv $s3file $S3ROOT/old/$DIRPREFIX/$dt/$1"
+        echo "--force: $cmd"
+        $cmd
+    fi
+}
+
+export -f force

@@ -44,11 +44,7 @@ for dataset in $DATASETS ; do
             if ! cache_read ${encoding}_${truncate}_${dataset}.tar ; then
                 to_get="${to_get}${dataset}.${encoding}.${truncate} "
             elif [ "$1" = "--force" ] ; then
-                if [ -f "encode/data/${encoding}_${truncate}_${dataset}.tar" ] ; then
-                    cmd="mv encode/data/${encoding}_${truncate}_${dataset}.tar /tmp"
-                    echo "--force: $cmd"
-                fi 
-                $cmd
+                force ${encoding}_${truncate}_${dataset}.tar
                 to_get="${to_get}${dataset}.${encoding}.${truncate} "
             fi
         done

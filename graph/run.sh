@@ -4,8 +4,8 @@
 # where a given line contains nodes adjacent to the first <target> node
 # and their edge weights.
 #
-# The file is outputted as ${dataset}.graph.0000 all in text format, chunked into
-# files of CHUNK lines, default 20k.
+# The file is outputted as ${dataset}.graph.00000 all in text format, chunked into
+# files of CHUNK lines, default 10k.
 #
 # Any node is only ever a <target> once. Redundant bidirectional edges are not encoded.
 # Also creates a ${dataset}.jsonl with log info.
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-CHUNK=${CHUNK:-20000}
+CHUNK=${CHUNK:-10000}
 
 echo generating co-occurrence graph for $DATASETS
 echo cache root "$S3ROOT"
@@ -30,12 +30,7 @@ for dataset in $DATASETS ; do
     if ! cache_read ${dataset}.graph.tar ; then
         to_get="${to_get}${dataset} "
     elif [ "$1" = "--force" ] ; then
-        f="graph/data/${dataset}.graph.tar"
-        if [ -f "$f" ] ; then
-            cmd="mv $f /tmp"
-            echo "--force: $cmd"
-        fi
-        $cmd
+        force "${dataset}.graph.tar"
         to_get="${to_get}${dataset} "
     fi
 done
@@ -58,7 +53,7 @@ for dataset in $to_get ; do
     target/release/examples/graph --files $all --out graph/data/${dataset}.graph > graph/data/${dataset}.jsonl
     rm $all
 
-    split -l $CHUNK -a 4 -d graph/data/${dataset}.graph graph/data/${dataset}.graph.
+    split -l $CHUNK -a 5 -d graph/data/${dataset}.graph graph/data/${dataset}.graph.
     rm graph/data/${dataset}.graph
     all=$(find graph/data -maxdepth 1 -type f -regextype posix-extended -regex \
                "graph/data/${dataset}."'graph\.[0-9]+' -print0 \

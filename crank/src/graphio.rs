@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
+use std::time::Instant;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressIterator, ProgressStyle};
 use rayon::iter::{
@@ -18,6 +19,7 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
 };
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use serde_json::json;
 
 use crate::{graph::Graph, svmlight, Scanner, SparseMatrix};
 
@@ -123,10 +125,13 @@ pub fn write(csr: &[SparseMatrix], nvertices: usize, out: &PathBuf) -> (usize, f
 
 /// Reads a single file behind a scanner into an in-memory graph.
 pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph {
-    let (offsets, mut edges) = {
+    // if you *really* want this to crank then swap out the atomics for sharded owners
+    // and use mpsc queues to pass around increment/store messages
+    let (offsets, mut edges, offset_time, edge_time) = {
         let mut atomic_offsets: Vec<_> = iter::repeat_with(|| AtomicUsize::new(0))
             .take(nvertices + 1)
             .collect();
+        let offset_start = Instant::now();
         scanner
             .fold(
                 |_| (),
@@ -143,6 +148,7 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
                 },
             )
             .collect::<()>();
+        let offset_time = format!("{:.0?}", Instant::now().duration_since(offset_start));
 
         let mut cumsum = 0;
         for offset in atomic_offsets.iter_mut() {
@@ -159,6 +165,7 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
         let atomic_edges: Vec<_> = iter::repeat_with(|| AtomicU32::new(0))
             .take(nedges)
             .collect();
+        let edge_start = Instant::now();
         scanner
             .fold(
                 |_| (),
@@ -179,15 +186,19 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
                 },
             )
             .collect::<()>();
+        let edge_time = format!("{:.0?}", Instant::now().duration_since(edge_start));
         (
             offsets,
             atomic_edges
                 .into_iter()
                 .map(|a| a.into_inner())
                 .collect::<Vec<_>>(),
+            offset_time,
+            edge_time,
         )
     };
 
+    let sort_start = Instant::now();
     {
         // fight the borrow checker
         let mut head_and_tail = edges.split_at_mut(0);
@@ -201,6 +212,16 @@ pub fn read(scanner: &Scanner, nvertices: usize, min_edge_weight: u32) -> Graph 
             .par_iter_mut()
             .for_each(|s| s.sort_unstable());
     }
+    let sort_time = format!("{:.0?}", Instant::now().duration_since(sort_start));
+
+    println!(
+        "{}",
+        json!({
+            "sort_time": sort_time,
+            "edge_time": edge_time,
+            "offset_time": offset_time,
+        })
+    );
 
     Graph::new(offsets, edges)
 }

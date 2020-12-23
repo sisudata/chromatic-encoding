@@ -18,6 +18,7 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
 };
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use serde_json::json;
 
 use crate::{
     atomic_rw::{ReadGuard, Rwu32},
@@ -43,16 +44,20 @@ pub fn remap(ncolors: u32, colors: &[u32]) -> Vec<u32> {
     remap
 }
 
-/// Returns `(ncolors, colors, log_info)` for a max-degree-ordered coloring of the graph.
-pub fn greedy(graph: &Graph) -> (u32, Vec<u32>, HashMap<String, f64>) {
+/// Returns `(ncolors, colors)` for a max-degree-ordered coloring of the graph.
+pub fn greedy(graph: &Graph) -> (u32, Vec<u32>) {
     let nvertices = graph.nvertices();
     let mut vertices: Vec<_> = (0..nvertices).map(|v| v as Vertex).collect();
+
+    let sort_start = Instant::now();
     vertices.sort_unstable_by_key(|&v| graph.degree(v));
+    let sort_time = format!("{:.0?}", Instant::now().duration_since(sort_start));
 
     const NO_COLOR: u32 = std::u32::MAX;
     let mut colors: Vec<u32> = vec![NO_COLOR; nvertices];
     let mut adjacent_colors: Vec<bool> = Vec::new();
 
+    let greedy_start = Instant::now();
     for vertex in vertices.into_iter().rev() {
         // loop invariant is that none of adjacent_colors elements are true
 
@@ -99,28 +104,26 @@ pub fn greedy(graph: &Graph) -> (u32, Vec<u32>, HashMap<String, f64>) {
             }
         }
     }
+    let greedy_time = format!("{:.0?}", Instant::now().duration_since(greedy_start));
 
     let ncolors = adjacent_colors.len();
-    (
-        ncolors as u32,
-        colors,
-        [("greedy_ncolors".to_owned(), ncolors as f64)]
-            .iter()
-            .cloned()
-            .collect(),
-    )
+
+    println!(
+        "{}",
+        json!({
+            "vertex_sort_time": sort_time,
+            "greedy_color_time": greedy_time,
+            "greedy_ncolors": ncolors,
+        })
+    );
+
+    (ncolors as u32, colors)
 }
 
 /// Returns `(ncolors, colors)` for a Glauber-colored graph. If greedy colors
 /// requires more colors than specified, then increases the color count to that many.
-pub fn glauber(
-    graph: &Graph,
-    ncolors: u32,
-    nsamples: usize,
-) -> (u32, Vec<u32>, HashMap<String, f64>) {
-    let greedy_start = Instant::now();
-    let (greedy_ncolors, colors, _) = greedy(graph);
-    let greedy_time = Instant::now().duration_since(greedy_start);
+pub fn glauber(graph: &Graph, ncolors: u32, nsamples: usize) -> (u32, Vec<u32>) {
+    let (greedy_ncolors, colors) = greedy(graph);
     assert!(
         greedy_ncolors <= ncolors,
         "greedy ncolors {} budget {}",
@@ -172,27 +175,19 @@ pub fn glauber(
 
     let colors = colors.into_iter().map(|x| x.into_inner()).collect();
 
-    // implement parallel monte carlo with *SORTED* neighbors
-    // make neighbors atomic u64s
-    (
-        ncolors,
-        colors,
-        [
-            ("greedy_ncolors".to_owned(), greedy_ncolors as f64),
-            ("nsamples".to_owned(), nsamples as f64),
-            ("conflicts".to_owned(), conflicts as f64),
-            ("nthreads".to_owned(), nthreads as f64),
-            (
-                "conflict_percent".to_owned(),
-                100.0 * conflicts as f64 / (nsamples + conflicts) as f64,
-            ),
-            ("greedy_time".to_owned(), greedy_time.as_secs_f64()),
-            ("glauber_time".to_owned(), glauber_time.as_secs_f64()),
-        ]
-        .iter()
-        .cloned()
-        .collect(),
-    )
+    println!(
+        "{}",
+        json!({
+            "greedy_ncolors": greedy_ncolors as f64,
+            "nsamples": nsamples as f64,
+            "conflicts": conflicts as f64,
+            "nthreads": nthreads as f64,
+            "conflict_percent": 100.0 * conflicts as f64 / (nsamples + conflicts) as f64,
+            "glauber_time": format!("{:.0?}", glauber_time),
+        })
+    );
+
+    (ncolors, colors)
 }
 
 /// Crucially, only drop neighbor locks after vertex is updated.

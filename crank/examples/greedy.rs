@@ -88,13 +88,9 @@ fn main() {
                 format!("{:.0?}", Instant::now().duration_since(load_graph_start))
         })
     );
-    // TODO: above needs speedup (try CHUNK=10k).
-    // Print finer grained json (log_info below) inside methods
-    // themselves, including load_graph
-    // **run TRUNCATES 1000 NEURAL nets for spot check on ce**
 
     let colors_start = Instant::now();
-    let (ncolors, colors, log_info) = if opt.ncolors == 0 {
+    let (ncolors, colors) = if opt.ncolors == 0 {
         color::greedy(&graph)
     } else {
         color::glauber(&graph, opt.ncolors, opt.nsamples)
@@ -107,7 +103,6 @@ fn main() {
             "color_cardinalities": compute_color_cardinalities(&colors, &remap),
             "colors_duration": format!("{:.0?}", Instant::now().duration_since(colors_start)),
             "glauber": opt.ncolors > 0,
-            "info": log_info,
         })
     );
 
