@@ -43,7 +43,7 @@ for dataset in $DATASETS ; do
             fi
             if ! cache_read ${encoding}_${truncate}_${dataset}.tar ; then
                 to_get="${to_get}${dataset}.${encoding}.${truncate} "
-            elif [ "$1" = "--force" ] ; then
+            elif [ "${1:-}" = "--force" ] ; then
                 force ${encoding}_${truncate}_${dataset}.tar
                 to_get="${to_get}${dataset}.${encoding}.${truncate} "
             fi
