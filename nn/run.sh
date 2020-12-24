@@ -50,8 +50,8 @@ for dataset_encoding_truncate_modelname in $to_get ; do
     tar xf nn/data/${dataset_encoding_truncate}.bin.tar -C nn/data
     rm nn/data/${dataset_encoding_truncate}.bin.tar
 
-    DATASET="${dataset}" ENCODING="${encoding}" TRUNCATE="${truncate}" MODELNAME="${modelname}" python \
-           -m nn.run \
+    RAY_ADDRESS="${RAY_ADDRESS:-}" DATASET="${dataset}" ENCODING="${encoding}" TRUNCATE="${truncate}" MODELNAME="${modelname}" python \
+           nn/run.py \
            nn/data/${dataset_encoding_truncate}.train.{data,indices,indptr,y} \
            nn/data/${dataset_encoding_truncate}.test.{data,indices,indptr,y} \
            nn/data/${dataset_encoding_truncate_modelname}.json \

@@ -23,15 +23,149 @@ DATASET = os.environ.get('DATASET')
 ENCODING = os.environ.get('ENCODING')
 TRUNCATE = os.environ.get('TRUNCATE')
 
+import numpy as np
+from scipy import sparse as sps
+
+def binprefix(data, indices, indptr, y):
+    files = [data, indices, indptr, y]
+    dtypes = [np.uint32, np.uint32, np.uint64, np.uint32]
+    data, indices, indptr, y = (
+        np.fromfile(f, dtype=d) for f, d in zip(files, dtypes))
+    return sps.csr_matrix((data, indices, indptr)), y
+
+def rpad(X, col):
+    assert X.getformat() == 'csr'
+    return sps.csr_matrix((X.data, X.indices, X.indptr), shape=(X.shape[0], col))
+
+from torchfm.model.afi import AutomaticFeatureInteractionModel
+from torchfm.model.afm import AttentionalFactorizationMachineModel
+from torchfm.model.dcn import DeepCrossNetworkModel
+from torchfm.model.dfm import DeepFactorizationMachineModel
+from torchfm.model.ffm import FieldAwareFactorizationMachineModel
+from torchfm.model.fm import FactorizationMachineModel
+from torchfm.model.fnfm import FieldAwareNeuralFactorizationMachineModel
+from torchfm.model.fnn import FactorizationSupportedNeuralNetworkModel
+from torchfm.model.lr import LogisticRegressionModel
+from torchfm.model.ncf import NeuralCollaborativeFiltering
+from torchfm.model.nfm import NeuralFactorizationMachineModel
+from torchfm.model.pnn import ProductNeuralNetworkModel
+from torchfm.model.wd import WideAndDeepModel
+from torchfm.model.xdfm import ExtremeDeepFactorizationMachineModel
+from torchfm.model.afn import AdaptiveFactorizationNetwork
+from torchfm.model.hofm import HighOrderFactorizationMachineModel
+
+def get_model(name, field_dims):
+    """
+    Parameter settings copied directly from pytorch-fm repo
+    """
+    if name == 'lr':
+        return LogisticRegressionModel(field_dims)
+    elif name == 'fm':
+        return FactorizationMachineModel(field_dims, embed_dim=16)
+    elif name == 'hofm':
+        return HighOrderFactorizationMachineModel(field_dims, order=3, embed_dim=16)
+    elif name == 'ffm':
+        return FieldAwareFactorizationMachineModel(field_dims, embed_dim=4)
+    elif name == 'fnn':
+        return FactorizationSupportedNeuralNetworkModel(field_dims, embed_dim=16, mlp_dims=(16, 16), dropout=0.2)
+    elif name == 'wd':
+        return WideAndDeepModel(field_dims, embed_dim=16, mlp_dims=(16, 16), dropout=0.2)
+    elif name == 'ipnn':
+        return ProductNeuralNetworkModel(field_dims, embed_dim=16, mlp_dims=(16,), method='inner', dropout=0.2)
+    elif name == 'opnn':
+        return ProductNeuralNetworkModel(field_dims, embed_dim=16, mlp_dims=(16,), method='outer', dropout=0.2)
+    elif name == 'dcn':
+        return DeepCrossNetworkModel(field_dims, embed_dim=16, num_layers=3, mlp_dims=(16, 16), dropout=0.2)
+    elif name == 'nfm':
+        return NeuralFactorizationMachineModel(field_dims, embed_dim=64, mlp_dims=(64,), dropouts=(0.2, 0.2))
+    elif name == 'ncf':
+        raise ValueError('only movielens')
+    elif name == 'fnfm':
+        return FieldAwareNeuralFactorizationMachineModel(field_dims, embed_dim=4, mlp_dims=(64,), dropouts=(0.2, 0.2))
+    elif name == 'dfm':
+        return DeepFactorizationMachineModel(field_dims, embed_dim=16, mlp_dims=(16, 16), dropout=0.2)
+    elif name == 'xdfm':
+        return ExtremeDeepFactorizationMachineModel(
+            field_dims, embed_dim=16, cross_layer_sizes=(16, 16), split_half=False, mlp_dims=(16, 16), dropout=0.2)
+    elif name == 'afm':
+        return AttentionalFactorizationMachineModel(field_dims, embed_dim=16, attn_size=16, dropouts=(0.2, 0.2))
+    elif name == 'afi':
+        return AutomaticFeatureInteractionModel(
+             field_dims, embed_dim=16, atten_embed_dim=64, num_heads=2, num_layers=3, mlp_dims=(400, 400), dropouts=(0, 0, 0))
+    elif name == 'afn':
+        return AdaptiveFactorizationNetwork(
+            field_dims, embed_dim=16, LNN_dim=1500, mlp_dims=(400, 400, 400), dropouts=(0, 0, 0))
+    else:
+        raise ValueError('unknown model name: ' + name)
+
+import torch
+from sklearn.metrics import roc_auc_score
+import tqdm
+
+from time import time
+
+PEAK_MEM_KEYS = [
+    "allocated_bytes.all.peak",
+    "reserved_bytes.all.peak",
+    "active_bytes.all.peak",
+    "inactive_split_bytes.all.peak",
+]
+
+def train(model, optimizer, data_loader, criterion, device, epoch_name, disable_tqdm=False):
+    model.train()
+    total_loss = 0
+    nex = 0
+    if device.type == "cuda":
+        torch.cuda.reset_max_memory_allocated(device)
+    t = time()
+    for i, (fields, target) in enumerate(tqdm.tqdm(data_loader, ncols=80, desc=epoch_name, leave=False, disable=(disable_tqdm or None))):
+        fields, target = fields.to(device), target.to(device)
+        y = model(fields)
+        loss = criterion(y, target.float())
+        model.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+        nex += 1
+    t = time() - t
+    memstats = torch.cuda.memory_stats(device) if device.type == "cuda" else {}
+    return total_loss / nex, t, memstats
+
+
+from sklearn.metrics import log_loss, accuracy_score
+from sklearn.metrics import roc_auc_score
+
+def test(model, data_loader, device, disable_tqdm=False):
+    model.eval()
+    targets, predicts = list(), list()
+    with torch.no_grad():
+        for fields, target in tqdm.tqdm(data_loader, ncols=80, desc='eval', leave=False, disable=(disable_tqdm or None)):
+            fields, target = fields.to(device), target.to(device)
+            y = model(fields)
+            targets.extend(target.tolist())
+            predicts.extend(y.tolist())
+
+    best_const = max(accuracy_score(targets, np.zeros(len(targets))), accuracy_score(targets, np.ones(len(targets))))
+
+    return accuracy_score(targets, [x > 0.5 for x in predicts]), log_loss(targets, predicts), roc_auc_score(targets, predicts), best_const
+
+import random, warnings
+
+def seed_all(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    warnings.filterwarnings(
+        "ignore", message=r".*CUDA initialization: Found no NVIDIA driver.*")
+
 import ray
 
 # if not set, creates a local ray
 ray.init(address=os.environ.get('RAY_ADDRESS'))
 
-LOCAL = os.environ.get('RAY_ADDRESS') is None
+LOCAL = not os.environ.get('RAY_ADDRESS')
 
 import sys
-from .utils import binprefix
 
 json_out = sys.argv[9]
 pdf_out = sys.argv[10]
@@ -47,8 +181,6 @@ t = time() - t
 print('loaded test binary csr in {:7.4f} sec'.format(t))
 
 NCOL = max(train_X.shape[1], test_X.shape[1])
-
-from .utils import rpad
 
 train_X = rpad(train_X, NCOL)
 test_X = rpad(test_X, NCOL)
@@ -66,7 +198,7 @@ from torch.utils.data import DataLoader
 from torchfm.dataset.sps import SparseDataset
 from ray import tune
 
-from .utils import get_model, train, test, PEAK_MEM_KEYS, seed_all
+# from .utils import get_model, train, test, PEAK_MEM_KEYS, seed_all
 import torch
 
 def train_wrapper(config, train_X=None, train_y=None, field_dims=None, epochs=None, batch_size=None):
@@ -98,7 +230,7 @@ def train_wrapper(config, train_X=None, train_y=None, field_dims=None, epochs=No
         train_time += epoch_t
         _, tloss, _, _ = test(model, val_data_loader, device, disable_tqdm=True)
 
-        tune.report(train_loss=loss, val_loss=tloss, train_time=train_time, **epoch_mem)
+        tune.report(train_loss=loss, val_loss=tloss, train_time=train_time, **{k: epoch_mem.get(k) for k in PEAK_MEM_KEYS})
 
 seed_all(1234)
 params = {
@@ -117,18 +249,32 @@ resources = {
     'gpu': 0 if LOCAL else 1,
 }
 
-analysis = tune.run(
-    tune.with_parameters(train_wrapper, **params),
-    config=search_space,
-    num_samples=(4 if LOCAL else 10),
-    name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
-    resources_per_trial=resources,
-    metric="val_loss",
-    scheduler=tune.schedulers.ASHAScheduler(
-        max_t=params["epochs"],
-        grace_period=max(params["epochs"] // 5, 1)),
-    max_failures=2,
-    mode="min")
+# try to resume first
+for resume in [True, False]:
+    try:
+        analysis = tune.run(
+            tune.with_parameters(train_wrapper, **params),
+            config=search_space,
+            num_samples=(4 if LOCAL else 10),
+            name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
+            resources_per_trial=resources,
+            metric="val_loss",
+            queue_trials=True,
+            scheduler=tune.schedulers.ASHAScheduler(
+                max_t=params["epochs"],
+                grace_period=max(params["epochs"] // 5, 1)),
+            resume=resume,
+            local_dir="nn/data/ray_experiments",
+            max_failures=2,
+            mode="min")
+        break
+    except ValueError as e:
+        if 'Called resume when no checkpoint exists in local directory.' in str(e):
+            continue
+        else:
+            raise
+
+
 
 BEST_CONFIG = dict(analysis.best_config)
 print('best config', BEST_CONFIG)
