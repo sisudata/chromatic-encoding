@@ -29,11 +29,10 @@ from torchfm.model.xdfm import ExtremeDeepFactorizationMachineModel
 from torchfm.model.afn import AdaptiveFactorizationNetwork
 from torchfm.model.hofm import HighOrderFactorizationMachineModel
 
-def get_model(name, dataset):
+def get_model(name, field_dims):
     """
     Parameter settings copied directly from pytorch-fm repo
     """
-    field_dims = dataset.field_dims
     if name == 'lr':
         return LogisticRegressionModel(field_dims)
     elif name == 'fm':
@@ -55,11 +54,7 @@ def get_model(name, dataset):
     elif name == 'nfm':
         return NeuralFactorizationMachineModel(field_dims, embed_dim=64, mlp_dims=(64,), dropouts=(0.2, 0.2))
     elif name == 'ncf':
-        # only supports MovieLens dataset because for other datasets user/item colums are indistinguishable
-        assert isinstance(dataset, MovieLens20MDataset) or isinstance(dataset, MovieLens1MDataset)
-        return NeuralCollaborativeFiltering(field_dims, embed_dim=16, mlp_dims=(16, 16), dropout=0.2,
-                                            user_field_idx=dataset.user_field_idx,
-                                            item_field_idx=dataset.item_field_idx)
+        raise ValueError('only movielens')
     elif name == 'fnfm':
         return FieldAwareNeuralFactorizationMachineModel(field_dims, embed_dim=4, mlp_dims=(64,), dropouts=(0.2, 0.2))
     elif name == 'dfm':
@@ -77,3 +72,63 @@ def get_model(name, dataset):
             field_dims, embed_dim=16, LNN_dim=1500, mlp_dims=(400, 400, 400), dropouts=(0, 0, 0))
     else:
         raise ValueError('unknown model name: ' + name)
+
+import torch
+from sklearn.metrics import roc_auc_score
+import tqdm
+
+from time import time
+
+PEAK_MEM_KEYS = [
+    "allocated_bytes.all.peak",
+    "reserved_bytes.all.peak",
+    "active_bytes.all.peak",
+    "inactive_split_bytes.all.peak",
+]
+
+def train(model, optimizer, data_loader, criterion, device, epoch_name, disable_tqdm=False):
+    model.train()
+    total_loss = 0
+    nex = 0
+    if device.type == "cuda":
+        torch.cuda.reset_max_memory_allocated(device)
+    t = time()
+    for i, (fields, target) in enumerate(tqdm.tqdm(data_loader, ncols=80, desc=epoch_name, leave=False, disable=(disable_tqdm or None))):
+        fields, target = fields.to(device), target.to(device)
+        y = model(fields)
+        loss = criterion(y, target.float())
+        model.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+        nex += 1
+    t = time() - t
+    memstats = torch.cuda.memory_stats(device) if device.type == "cuda" else {}
+    return total_loss / nex, t, memstats
+
+
+from sklearn.metrics import log_loss, accuracy_score
+from sklearn.metrics import roc_auc_score
+
+def test(model, data_loader, device, disable_tqdm=False):
+    model.eval()
+    targets, predicts = list(), list()
+    with torch.no_grad():
+        for fields, target in tqdm.tqdm(data_loader, ncols=80, desc='eval', leave=False, disable=(disable_tqdm or None)):
+            fields, target = fields.to(device), target.to(device)
+            y = model(fields)
+            targets.extend(target.tolist())
+            predicts.extend(y.tolist())
+
+    best_const = max(accuracy_score(targets, np.zeros(len(targets))), accuracy_score(targets, np.ones(len(targets))))
+
+    return accuracy_score(targets, [x > 0.5 for x in predicts]), log_loss(targets, predicts), roc_auc_score(targets, predicts), best_const
+
+import random, warnings
+
+def seed_all(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    warnings.filterwarnings(
+        "ignore", message=r".*CUDA initialization: Found no NVIDIA driver.*")

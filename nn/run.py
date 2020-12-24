@@ -1,28 +1,40 @@
 #!/usr/bin/env python
-# Expects 9 command line parameters:
+# Expects 10 command line parameters:
 #
 # train.data train.indices train.indptr train.y
 # test.data test.indices test.indptr test.y
-# json-output-file
+# json-output-file hyper-train-file
 #
-# Trains a neural net, logging to stdout, and saving resutls in a final json
+# Trains a neural net, logging to stdout, and saving results in a final json
+# and hyper tuning in a pdf.
 #
-# Uses the env vars below for their obvious purposes.
+# Uses the env vars below, see repo README for details.
+
+from multiprocessing import cpu_count
 
 import os
 from time import time
+import warnings
+warnings.filterwarnings(
+    "ignore", message=r".*CUDA initialization: Found no NVIDIA driver.*")
 
 MODELNAME = os.environ.get('MODELNAME')
 DATASET = os.environ.get('DATASET')
 ENCODING = os.environ.get('ENCODING')
 TRUNCATE = os.environ.get('TRUNCATE')
-CUDA = os.environ.get('CUDA_VISIBLE_DEVICES')
 
+import ray
+
+# if not set, creates a local ray
+ray.init(address=os.environ.get('RAY_ADDRESS'))
+
+LOCAL = os.environ.get('RAY_ADDRESS') is None
 
 import sys
 from .utils import binprefix
 
 json_out = sys.argv[9]
+pdf_out = sys.argv[10]
 
 t = time()
 train_X, train_y = binprefix(*sys.argv[1:5])
@@ -50,88 +62,145 @@ field_dims = np.maximum(Xm.ravel(), tXm.ravel()) + 1
 t = time() - t
 print('computed field dims in {:7.4f} sec'.format(t))
 
-import torch
-from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
-import tqdm
-
 from torchfm.dataset.sps import SparseDataset
+from ray import tune
 
-def train(model, optimizer, data_loader, criterion, device, epoch_name, disable_tqdm=False):
-    model.train()
-    total_loss = 0
-    nex = 0
-    t = time()
-    for i, (fields, target) in enumerate(tqdm.tqdm(data_loader, ncols=80, desc=epoch_name, leave=False, disable=(disable_tqdm or None))):
-        fields, target = fields.to(device), target.to(device)
-        y = model(fields)
-        loss = criterion(y, target.float())
-        model.zero_grad()
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-        nex += 1
-    t = time() - t
-    return total_loss / nex, t
+from .utils import get_model, train, test, PEAK_MEM_KEYS, seed_all
+import torch
 
+def train_wrapper(config, train_X=None, train_y=None, field_dims=None, epochs=None, batch_size=None):
+    seed_all(1234)
+    if LOCAL:
+        ix = np.random.choice(train_X.shape[0], batch_size * 4)
+        train_X = train_X[ix, :]
+        train_y = train_y[ix]
+    val_ix = train_X.shape[0] * 8 // 10
 
-from sklearn.metrics import log_loss, accuracy_score
-from sklearn.metrics import roc_auc_score
+    train_dataset = SparseDataset(train_X[:val_ix, :], train_y[:val_ix], field_dims)
+    val_dataset = SparseDataset(train_X[val_ix:, :], train_y[val_ix:], field_dims)
+    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
+    val_data_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=0)
 
-def test(model, data_loader, device, disable_tqdm=False):
-    model.eval()
-    targets, predicts = list(), list()
-    with torch.no_grad():
-        for fields, target in tqdm.tqdm(data_loader, ncols=80, desc='eval', leave=False, disable=(disable_tqdm or None)):
-            fields, target = fields.to(device), target.to(device)
-            y = model(fields)
-            targets.extend(target.tolist())
-            predicts.extend(y.tolist())
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        torch.set_num_threads(cpu_count())
+        device = torch.device("cpu")
+    model = get_model(MODELNAME, field_dims).to(device)
+    criterion = torch.nn.BCELoss()
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=config["lr"], weight_decay=config["wd"])
+    train_time = 0
 
-    best_const = max(accuracy_score(targets, np.zeros(len(targets))), accuracy_score(targets, np.ones(len(targets))))
+    for epoch_i in range(epochs):
+        epoch_name = 'epoch {:4d} of {}'.format(epoch_i + 1, epochs)
+        loss, epoch_t, epoch_mem = train(model, optimizer, train_data_loader, criterion, device, epoch_name, disable_tqdm=True)
+        train_time += epoch_t
+        _, tloss, _, _ = test(model, val_data_loader, device, disable_tqdm=True)
 
-    return accuracy_score(targets, [x > 0.5 for x in predicts]), log_loss(targets, predicts), roc_auc_score(targets, predicts), best_const
+        tune.report(train_loss=loss, val_loss=tloss, train_time=train_time, **epoch_mem)
 
-from .utils import get_model
+seed_all(1234)
+params = {
+    "train_X": train_X,
+    "train_y": train_y,
+    "field_dims": field_dims,
+    "epochs": 20,
+    "batch_size": 256,
+}
+search_space = {
+    "lr": tune.loguniform(1e-5, 1e-2),
+    "wd": tune.loguniform(1e-5, 1e-2),
+}
+resources = {
+    'cpu': cpu_count() if LOCAL else 0,
+    'gpu': 0 if LOCAL else 1,
+}
 
-def runall(train_dataset,
-           test_dataset,
-           device,
-           epoch,
-           learning_rate,
-           batch_size,
-           weight_decay,
-           disable_tqdm=False):
+analysis = tune.run(
+    tune.with_parameters(train_wrapper, **params),
+    config=search_space,
+    num_samples=(4 if LOCAL else 10),
+    name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
+    resources_per_trial=resources,
+    metric="val_loss",
+    scheduler=tune.schedulers.ASHAScheduler(
+        max_t=params["epochs"],
+        grace_period=max(params["epochs"] // 5, 1)),
+    max_failures=2,
+    mode="min")
+
+BEST_CONFIG = dict(analysis.best_config)
+print('best config', BEST_CONFIG)
+BATCH_SIZE = params["batch_size"]
+EPOCHS = params["epochs"]
+
+from matplotlib import pyplot as plt
+
+fig, axs = plt.subplots(2)
+dfs = analysis.trial_dataframes
+for d in dfs.values():
+    d.train_loss.plot(ax=axs[0])
+    d.val_loss.plot(ax=axs[1])
+axs[0].set_title("hpo train loss")
+axs[1].set_title("hpo val loss")
+for ax in axs.flat:
+    ax.set(xlabel='epoch', ylabel='log loss')
+    ax.label_outer()
+fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1))
+plt.savefig(pdf_out,  bbox_inches='tight')
+
+@ray.remote(num_cpus=resources['cpu'], num_gpus=resources['gpu'])
+def retrain_and_test(datasets, field_dims):
+    seed_all(1234)
+    (train_X, train_y, test_X, test_y) = datasets
+    if LOCAL:
+        ix = np.random.choice(train_X.shape[0], BATCH_SIZE * 4)
+        train_X = train_X[ix, :]
+        train_y = train_y[ix]
+        ix = np.random.choice(test_X.shape[0], BATCH_SIZE * 2)
+        test_X = test_X[ix, :]
+        test_y = test_y[ix]
+
+    train_dataset = SparseDataset(train_X, train_y, field_dims)
+    test_dataset = SparseDataset(test_X, test_y, field_dims)
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        torch.set_num_threads(cpu_count())
+        device = torch.device("cpu")
+
     emit = {}
-
     emit["num_train"] = len(train_dataset)
     emit["num_test"] = len(test_dataset)
     emit["modelname"] = MODELNAME
     emit["dataset"] = DATASET
     emit["encoding"] = ENCODING
-    emit["device"] = device
+    emit["device"] = str(device.type)
     emit["truncate"] = NCOL # == TRUNCATE unless 0, in which case == ncolors
     print(emit)
 
-    device = torch.device(device)
-
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
-    test_data_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
-    model = get_model(MODELNAME, train_dataset).to(device)
+    train_data_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
+    test_data_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=0)
+    model = get_model(MODELNAME, field_dims).to(device)
     criterion = torch.nn.BCELoss()
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=BEST_CONFIG["lr"], weight_decay=BEST_CONFIG["wd"])
 
-    train_epoch_losses = []
-    test_epoch_losses = [] # can't use for optimization, but insightful retrospectively
     train_time = 0
-    for epoch_i in range(epoch):
-        epoch_name = 'epoch {:4d} of {}'.format(epoch_i + 1, epoch)
-        loss, epoch_t = train(model, optimizer, train_data_loader, criterion, device, epoch_name, disable_tqdm)
+    train_mem = {}
+    train_epoch_losses = []
+    test_epoch_losses = [] # only for debug, note val used above for hpo
+
+    for epoch_i in range(EPOCHS):
+        epoch_name = 'epoch {:4d} of {}'.format(epoch_i + 1, EPOCHS)
+        loss, epoch_t, epoch_mem = train(model, optimizer, train_data_loader, criterion, device, epoch_name, disable_tqdm=True)
         train_time += epoch_t
-        _, tloss, _, _ = test(model, test_data_loader, device, disable_tqdm)
-        print('epoch:', 1 + epoch_i, 'of', epoch,
+        train_mem = {k: max(train_mem.get(k, 0), epoch_mem.get(k, 0)) for k in PEAK_MEM_KEYS}
+        _, tloss, _, _ = test(model, test_data_loader, device, disable_tqdm=True)
+        print('epoch:', 1 + epoch_i, 'of', EPOCHS,
               'train: logloss: {:7.4f}'.format(loss),
-              'test : logloss: {:7.4f}'.format(tloss))
+              'val  : logloss: {:7.4f}'.format(tloss))
         sys.stdout.flush()
 
         train_epoch_losses.append(loss)
@@ -140,54 +209,26 @@ def runall(train_dataset,
     emit["train_epoch_logloss"] = train_epoch_losses
     emit["test_epoch_logloss"] = test_epoch_losses
 
-    emit["train_acc"], emit["train_logloss"], emit["train_auc"], emit["train_acc_best_const"] = test(model, train_data_loader, device, disable_tqdm)
+    emit["train_acc"], emit["train_logloss"], emit["train_auc"], emit["train_acc_best_const"] = test(model, train_data_loader, device, disable_tqdm=True)
     print('train:', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
           .format(emit["train_logloss"], emit["train_acc"], emit["train_auc"], emit["train_acc_best_const"]))
     sys.stdout.flush()
 
-    emit["test_acc"], emit["test_logloss"], emit["test_auc"], emit["test_acc_best_const"] = test(model, test_data_loader, device, disable_tqdm)
+    emit["test_acc"], emit["test_logloss"], emit["test_auc"], emit["test_acc_best_const"] = test(model, test_data_loader, device, disable_tqdm=True)
     print('test :', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
           .format(emit["test_logloss"], emit["test_acc"], emit["test_auc"], emit["test_acc_best_const"]))
     sys.stdout.flush()
 
     emit["train_sec"] = t
     emit['num_params'] = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    memstats = torch.cuda.memory_stats(device) if device.type == "cuda" else {}
-
-    keys = [
-        "allocated_bytes.all.peak",
-        "reserved_bytes.all.peak",
-        "active_bytes.all.peak",
-        "inactive_split_bytes.all.peak",
-    ]
-
-    for k in keys:
-        emit[k] = memstats.get(k)
+    for k in PEAK_MEM_KEYS:
+        emit[k] = train_mem.get(k)
 
     return emit
 
-import warnings
-warnings.filterwarnings(
-    "ignore", message=r".*CUDA initialization: Found no NVIDIA driver.*")
+datasets = (train_X, train_y, test_X, test_y)
 
-if CUDA:
-    device = "cuda" # max 1 gpu anyway
-else:
-    device = "cpu"
-
-train_dataset = SparseDataset(train_X, train_y, field_dims)
-test_dataset = SparseDataset(test_X, test_y, field_dims)
-
-emit = runall(
-    train_dataset,
-    test_dataset,
-    device,
-    epoch=20,
-    learning_rate=1e-3,
-    batch_size=256,
-    weight_decay=1e-6,
-    disable_tqdm=False)
+emit = ray.get(retrain_and_test.remote(datasets, field_dims))
 
 import json
 

@@ -9,7 +9,7 @@ Dimensionality reduction for discrete data encodings.
 Next, for any Python at least version `3.6`.
 
 ```
-pip install numpy jupyter scikit-learn scipy tqdm torch
+pip install numpy jupyter scikit-learn scipy tqdm torch ray[tune]
 pip uninstall torchfm
 pip install --force-reinstall git+https://github.com/vlad17/pytorch-fm/
 ```
@@ -20,7 +20,7 @@ We will also need various tools for parsing/etc:
 
 ```
 sudo apt install -y vowpal-wabbit datamash zstd nodejs npm moreutils gawk
-npm install -g relaxed-json
+npm install -g relaxed-json # TODO: do i still need this?
 # TODO gnu parallel -> rust parallel
 # https://github.com/mmstick/parallel
 ```
@@ -37,14 +37,12 @@ files to `/tmp` locally and some `old/` folder in S3 before continuing.
 * `DATASETS` defines which datasets to operate on, and should be a space-delimited string containing words `urltoy url kdda kddb kdd12`.
 * `ENCODINGS` specifies the different encodings to try, `ft` (feature truncation) or `ce` (chromatic encoding). The table below summarizes what each script does. TODO: ht encoding
 * `TRUNCATES` specifies the feature truncation limiting input width
-* `CUDA_VISIBLE_DEVICES` toggles GPU use if set to a GPU index (max 1 GPU)
 
 ```
 export S3ROOT="s3://sisu-datasets/ce-build"
-export DATASETS="urltoy url kdda kddb kdd12"
+export DATASETS="url kdda kddb kdd12"
 export ENCODINGS="ft ce"
 export TRUNCATES="1000 10000"
-export CUDA_VISIBLE_DEVICES=0
 ```
 
 | Script | Description |
@@ -55,9 +53,23 @@ export CUDA_VISIBLE_DEVICES=0
 | `bash encode/run.sh` | encode datasets up to prescribed dimension |
 | `bash nn/run.sh` | neural net train/test on encoded datasets |
 | `bash wabbit/run.sh` | vowpal wabbit train/test on clean datasets |
+| `bash distributed/run.sh` | run neural net experiments in parallel |
 
-`wabbit/run.sh` allows datasets of the form `${encoding}_${truncate}_${dataset}`, e.g., `ce_1000_url` for debug purposes.
+Looks like this re-implements Metaflow, basically. Whoops.
+
+### Additional Parameters
 
 For most GPUs, I would not recommend setting any `TRUNCATES` over `100000`.
 
-Looks like this re-implements Metaflow, basically. Whoops.
+Default AWS credentials are assumed available for S3 and EC2 access.
+
+#### Neural Networks
+
+For hyperparameter optimization and execution, `nn/run.sh` looks for `RAY_ADDRESS` to be set (can be set to `auto` for ray to automatically connect to ray if it's running on the same node). If unset, `nn/run.sh` runs in a debug/toy mode with light settings.
+
+Invoking `nn/run.sh` will only run hyperparameter optimization in parallel, not different algorithmic
+settings. To parallelize across those, use `distributed/run.sh`, which captures AWS credentials.
+
+#### Vowpal Wabbit 
+
+`wabbit/run.sh` allows datasets of the form `${encoding}_${truncate}_${dataset}`, e.g., `ce_1000_url` for debug purposes.

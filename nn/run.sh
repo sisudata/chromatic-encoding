@@ -3,7 +3,9 @@
 # are present in encode/data already.
 #
 # For given ${encoding}_${truncate}_${dataset}.tar, extracts the dataset, trains a neural net,
-# and saves logs and result metrics to ${dataset}.${encoding}.${truncate}.${modelname}.{log,json}.
+# and saves logs and result metrics to ${dataset}.${encoding}.${truncate}.${modelname}.tar
+#
+# which contains a .log logfile, .json result file, .pdf HPO viz all of the same basename.
 
 set -euo pipefail
 
@@ -20,10 +22,11 @@ for dataset in $DATASETS ; do
                 if [[ $truncate -eq 0 ]] && [ "$encoding" != "ce" ]; then
                     continue
                 fi
-                if \
-                    ! cache_read ${dataset}.${encoding}.${truncate}.${modelname}.log || \
-                        ! cache_read ${dataset}.${encoding}.${truncate}.${modelname}.json ; then
-                to_get="${to_get}${dataset}.${encoding}.${truncate}.${modelname} "
+                if ! cache_read ${dataset}.${encoding}.${truncate}.${modelname}.tar ; then
+                    to_get="${to_get}${dataset}.${encoding}.${truncate}.${modelname} "
+                elif [ "${1:-}" = "--force" ] ; then
+                    force "${dataset}.${encoding}.${truncate}.${modelname}.tar"
+                    to_get="${to_get}${dataset}.${encoding}.${truncate}.${modelname} "
                 fi
             done
         done
@@ -51,11 +54,15 @@ for dataset_encoding_truncate_modelname in $to_get ; do
            -m nn.run \
            nn/data/${dataset_encoding_truncate}.train.{data,indices,indptr,y} \
            nn/data/${dataset_encoding_truncate}.test.{data,indices,indptr,y} \
-           nn/data/${dataset_encoding_truncate_modelname}.json | tee nn/data/${dataset_encoding_truncate_modelname}.log
+           nn/data/${dataset_encoding_truncate_modelname}.json \
+           nn/data/${dataset_encoding_truncate_modelname}.pdf \
+        | tee nn/data/${dataset_encoding_truncate_modelname}.log
     
     rm nn/data/${dataset_encoding_truncate}.{train,test}.{data,indices,indptr,y}
     rm nn/data/${dataset_encoding_truncate}.jsonl
 
-    cache_write ${dataset_encoding_truncate_modelname}.log
-    cache_write ${dataset_encoding_truncate_modelname}.json
+    tar cf nn/data/${dataset_encoding_truncate_modelname}.tar -C nn/data \
+        --remove-files ${dataset_encoding_truncate_modelname}.{log,json,pdf}
+    
+    cache_write ${dataset_encoding_truncate_modelname}.tar
 done
