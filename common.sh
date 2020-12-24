@@ -29,7 +29,7 @@ export -f cache_read
 
 function cache_write {
     local fsfile="$DIRPREFIX/data/$1"
-    local s3file="$S3ROOT/$DIRPREFIX/$base"
+    local s3file="$S3ROOT/$DIRPREFIX/$1"
     aws s3 cp "$fsfile" "$s3file"
 }
 
