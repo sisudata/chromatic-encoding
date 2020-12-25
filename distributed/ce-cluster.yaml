@@ -1,0 +1,71 @@
+cluster_name: ce-cluster
+min_workers: 0
+max_workers: 8
+initial_workers: 8
+upscaling_speed: 2.0
+docker:
+    head_image: "rayproject/ray-ml:latest-cpu"
+    worker_image: "rayproject/ray-ml:latest-gpu"
+    container_name: "ray_container"
+    pull_before_run: True
+    run_options: []
+idle_timeout_minutes: 10
+provider:
+    type: aws
+    region: us-west-2
+    availability_zone: us-west-2b
+    cache_stopped_nodes: True
+auth:
+    ssh_user: ubuntu
+head_node:
+    InstanceType: r5.4xlarge
+    ImageId: ami-098555c9b343eb09c
+    BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+              VolumeSize: 1024
+    SubnetId: subnet-08e8308b46b4e9772
+worker_nodes:
+    InstanceType: p2.xlarge
+    ImageId: ami-098555c9b343eb09c
+    BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+              VolumeSize: 128
+    SubnetId: subnet-08e8308b46b4e9772
+    InstanceMarketOptions:
+        MarketType: spot
+    TagSpecifications:
+        - ResourceType: spot-instances-request
+          Tags:
+                - Key: VantaOwner
+                  Value: vlad@sisu.ai
+                - Key: VantaNonProd
+                  Value: "true"
+                - Key: VantaDescription
+                  Value: "Ray Cluster Framework"
+                - Key: VantaContainsUserData
+                  Value: "true"
+                - Key: VantaNoAlert
+                  Value: "Datasci exploration, not prod"
+file_mounts: {
+}
+initialization_commands: []
+setup_commands:
+    - pip install numpy jupyter scikit-learn scipy tqdm torch ray[tune] awscli
+    - pip install --force-reinstall git+https://github.com/vlad17/pytorch-fm/
+    - while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do sleep 1; done && sudo apt install -y vowpal-wabbit datamash zstd moreutils gawk
+head_setup_commands: []
+worker_setup_commands: []
+head_start_ray_commands:
+    - ray stop
+    - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --object-store-memory=$((1024 * 1024 * 1024 * 96))
+worker_start_ray_commands:
+    - ray stop
+    - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076
+rsync_exclude:
+    - "**/.git"
+    - "**/.git/**"
+rsync_filter:
+    - ".gitignore"
+file_mounts_sync_continuously: False
