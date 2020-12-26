@@ -64,7 +64,7 @@ Default AWS credentials are assumed available for S3 and EC2 access.
 
 #### Neural Networks
 
-For hyperparameter optimization and execution, `nn/run.sh` looks for `RAY_ADDRESS` to be set (can be set to `auto` for ray to automatically connect to ray if it's running on the same node). If unset, `nn/run.sh` runs in a debug/toy mode with light settings.
+For hyperparameter optimization and execution, `nn/run.sh` looks for `RAY_ADDR` to be set (can be set to `auto` for ray to automatically connect to ray if it's running on the same node). If unset, `nn/run.sh` runs in a debug/toy mode with light settings.
 
 Invoking `nn/run.sh` will only run hyperparameter optimization (HPO) in parallel, but will run different encoding/dataset/truncation triplets serially
 
@@ -106,3 +106,12 @@ ray dashboard distributed/ce-cluster.yaml
 # wind down cluster
 ray down distributed/ce-cluster.yaml
 ```
+
+## Libraries
+
+| Library | Description |
+| --- | --- |
+| `crank` | rust preprocessing library and executables |
+| `pycrank` | deep learning architecture and evaluation utilities |
+
+Parts of `pycrank` were based on [pytorch-fm](https://github.com/rixwew/pytorch-fm).
