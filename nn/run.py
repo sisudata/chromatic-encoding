@@ -208,6 +208,7 @@ def retrain_and_test(datasets, field_dims):
         test_epoch_losses.append(d["val_loss"])
     pycrank.opt.train(model, train_data_loader, test_data_loader, device, BEST_CONFIG, callback)
 
+    emit["config"] = BEST_CONFIG
     emit["train_epoch_logloss"] = train_epoch_losses
     emit["test_epoch_logloss"] = test_epoch_losses
 

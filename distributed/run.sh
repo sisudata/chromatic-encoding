@@ -28,4 +28,4 @@ function remote_exec() {
 }
 
 remote_exec 'S3ROOT="'"$S3ROOT"'" DATASETS="'"$DATASETS"'" ENCODINGS="'"$ENCODINGS"'" TRUNCATES="'"$TRUNCATES"'" bash encode/run.sh'
-remote_exec 'RAY_ADDRESS="auto" S3ROOT="'"$S3ROOT"'" DATASETS="'"$DATASETS"'" ENCODINGS="'"$ENCODINGS"'" TRUNCATES="'"$TRUNCATES"'" MODELNAMES="wd" bash nn/run.sh --force'
+remote_exec 'RAY_ADDRESS="auto" S3ROOT="'"$S3ROOT"'" DATASETS="'"$DATASETS"'" ENCODINGS="'"$ENCODINGS"'" TRUNCATES="'"$TRUNCATES"'" MODELNAMES="wd" bash nn/run.sh --force' "$@"
