@@ -41,26 +41,19 @@ for dataset_encoding_truncate_modelname in $to_get ; do
     dataset="${dataset_encoding%.*}"
     encoding="${dataset_encoding##*.}"
 
-    cp encode/data/${encoding}_${truncate}_${dataset}.tar nn/data/
-    tar xf nn/data/${encoding}_${truncate}_${dataset}.tar -C nn/data
-    
-    rm nn/data/${encoding}_${truncate}_${dataset}.tar \
-       nn/data/${encoding}_${truncate}_${dataset}.{train,test}{.original,}.svm.*.zst
-    zstd -f -d -q --rm nn/data/${dataset_encoding_truncate}.bin.tar.zst
-    tar xf nn/data/${dataset_encoding_truncate}.bin.tar -C nn/data
-    rm nn/data/${dataset_encoding_truncate}.bin.tar
+    s3src="${S3ROOT}/encode/${encoding}_${truncate}_${dataset}.tar"
+    if ! aws s3 ls "$s3src" > /dev/null 2>/dev/null; then
+        echo "missing $s3src"
+        exit 1
+    fi
 
     RAY_ADDR="${RAY_ADDRESS:-}" DATASET="${dataset}" ENCODING="${encoding}" TRUNCATE="${truncate}" MODELNAME="${modelname}" python \
-           nn/run.py \
-           nn/data/${dataset_encoding_truncate}.train.{data,indices,indptr,y} \
-           nn/data/${dataset_encoding_truncate}.test.{data,indices,indptr,y} \
+            nn/run.py \
+            "$s3src" \
            nn/data/${dataset_encoding_truncate_modelname}.json \
            nn/data/${dataset_encoding_truncate_modelname}.pdf \
         | tee nn/data/${dataset_encoding_truncate_modelname}.log
     
-    rm nn/data/${dataset_encoding_truncate}.{train,test}.{data,indices,indptr,y}
-    rm nn/data/${dataset_encoding_truncate}.jsonl
-
     tar cf nn/data/${dataset_encoding_truncate_modelname}.tar -C nn/data \
         --remove-files ${dataset_encoding_truncate_modelname}.{log,json,pdf}
     

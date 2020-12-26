@@ -3,7 +3,9 @@ Embedding-aware optimization loops that allow mixed sparse/dense.
 """
 
 from time import time
+import sys
 
+from tqdm import tqdm
 from sklearn.metrics import log_loss, accuracy_score
 from sklearn.metrics import roc_auc_score
 from scipy.special import expit
@@ -12,7 +14,7 @@ import numpy as np
 
 from .utils import PEAK_MEM_KEYS
 
-def train(model, train_data_loader, val_data_loader, device, config, callback):
+def train(model, train_data_loader, val_data_loader, device, config, callback, tqdm=None):
     """
     Initialize a binary classification model with the specified name
     and train for the specified number of epochs.
@@ -39,13 +41,15 @@ def train(model, train_data_loader, val_data_loader, device, config, callback):
         params=[p for _, p in model.sparse_parameters()], lr=config["sparse_lr"])
 
     for epoch_i in range(config["epochs"]):
-        loss, epoch_t, epoch_mem = train_epoch(model, dense_optimizer, sparse_optimizer, train_data_loader, criterion, device)
+        epoch_name = 'epoch {:2d} of {}'.format(epoch_i + 1, config["epochs"])
+        tqdm_desc = '{} {}'.format(tqdm, epoch_name) if tqdm else None
+        loss, epoch_t, epoch_mem = train_epoch(model, dense_optimizer, sparse_optimizer, train_data_loader, criterion, device, tqdm_desc)
         _, tloss, _, _ = test(model, val_data_loader, device)
 
         callback(dict(epoch_i=epoch_i, train_loss=loss, val_loss=tloss, train_time=epoch_t, **{k: epoch_mem.get(k) for k in PEAK_MEM_KEYS}))
 
 
-def train_epoch(model, dense_optimizer, sparse_optimizer, data_loader, criterion, device):
+def train_epoch(model, dense_optimizer, sparse_optimizer, data_loader, criterion, device, tqdm_desc):
     """
     Trains one epoch.
 
@@ -57,7 +61,12 @@ def train_epoch(model, dense_optimizer, sparse_optimizer, data_loader, criterion
     if device.type == "cuda":
         torch.cuda.reset_max_memory_allocated(device)
     t = time()
-    for i, (fields, target) in enumerate(data_loader):
+    for i, (fields, target) in enumerate(
+            tqdm(data_loader,
+                 ncols=80,
+                 desc=(tqdm_desc or ''),
+                 mininterval=(60 * 10),
+                 leave=False, disable=(not tqdm_desc))):
         fields, target = fields.to(device), target.to(device)
         loss = criterion(model(fields), target.float())
         loss.backward()

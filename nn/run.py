@@ -39,59 +39,97 @@ LOCAL = not os.environ.get('RAY_ADDR')
 
 import sys
 
-json_out = sys.argv[9]
-pdf_out = sys.argv[10]
+s3src = sys.argv[1]
+json_out = sys.argv[2]
+pdf_out = sys.argv[3]
 
-with pycrank.utils.timeit('loading train csr'):
-    train_X, train_y = pycrank.utils.load_binary_csr(*sys.argv[1:5])
+import boto3
+s = boto3.Session()
+access_key = s.get_credentials().access_key
+region_name = s.region_name or "us-west-2"
+secret_key = s.get_credentials().secret_key
+awscreds = f"AWS_ACCESS_KEY_ID={access_key}"
+awscreds += f" AWS_DEFAULT_REGION={region_name}"
+awscreds += f" AWS_SECRET_ACCESS_KEY={secret_key}"
 
-with pycrank.utils.timeit('loading test csr'):
-    test_X, test_y = pycrank.utils.load_binary_csr(*sys.argv[5:9])
+import subprocess
 
-NCOL = max(train_X.shape[1], test_X.shape[1])
-train_X = pycrank.utils.rpad(train_X, NCOL)
-test_X = pycrank.utils.rpad(test_X, NCOL)
+etd = f"{ENCODING}_{TRUNCATE}_{DATASET}"
+DET = f"{DATASET}.{ENCODING}.{TRUNCATE}"
+CMD = f'''
+{awscreds} aws s3 cp {s3src} {etd}.tar >/dev/null 2>/dev/null
+tar xf {etd}.tar
+rm {etd}.tar {etd}.{{train,test}}{{.original,}}.svm.*.zst
+zstd -f -d -q --rm {DET}.bin.tar.zst
+tar xf {DET}.bin.tar
+rm {DET}.bin.tar
+rm {DET}.jsonl
+'''
 
-with pycrank.utils.timeit('computing field dims'):
-    Xm = train_X.max(axis=0).toarray()
-    tXm = test_X.max(axis=0).toarray()
-    field_dims = np.maximum(Xm.ravel(), tXm.ravel())
+
+def mkdata(datadir):
+    subprocess.check_call(['/bin/bash', '-c', CMD], cwd=datadir)
+    sparse_suffixes = ['data','indices','indptr','y']
+    with pycrank.utils.timeit('loading train csr'):
+        train_X, train_y = pycrank.utils.load_binary_csr(
+            *[f"{datadir}/{DET}.train.{x}" for x in sparse_suffixes])
+
+    with pycrank.utils.timeit('loading test csr'):
+        test_X, test_y = pycrank.utils.load_binary_csr(
+            *[f"{datadir}/{DET}.test.{x}" for x in sparse_suffixes])
+
+    ncol = max(train_X.shape[1], test_X.shape[1])
+    train_X = pycrank.utils.rpad(train_X, ncol)
+    test_X = pycrank.utils.rpad(test_X, ncol)
+
+    with pycrank.utils.timeit('computing field dims'):
+        Xm = train_X.max(axis=0).toarray()
+        tXm = test_X.max(axis=0).toarray()
+        field_dims = np.maximum(Xm.ravel(), tXm.ravel())
+
+    datasets = (train_X, train_y, test_X, test_y, field_dims, ncol)
+    return datasets
 
 from torch.utils.data import DataLoader
 from pycrank.sps import SparseDataset
 from ray import tune
+import tempfile
 
-def train_wrapper(config, train_X=None, train_y=None, field_dims=None, epochs=None, batch_size=None):
-    pycrank.utils.seed_all(1234)
-    if LOCAL:
-        ix = np.random.choice(train_X.shape[0], batch_size * 4)
-        train_X = train_X[ix, :]
-        train_y = train_y[ix]
-    val_ix = train_X.shape[0] * 8 // 10
+def mktmp():
+    from pathlib import Path
+    home = str(Path.home())
+    return tempfile.TemporaryDirectory(dir=home, prefix='ray-job-')
 
-    train_dataset = SparseDataset(train_X[:val_ix, :], train_y[:val_ix], field_dims)
-    val_dataset = SparseDataset(train_X[val_ix:, :], train_y[val_ix:], field_dims)
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
-    val_data_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=0)
+def train_wrapper(config, epochs=None, batch_size=None):
+    with mktmp() as tmpdir:
+        (train_X, train_y, _, _, field_dims, _) = mkdata(tmpdir)
+        pycrank.utils.seed_all(1234)
+        if LOCAL:
+            ix = np.random.choice(train_X.shape[0], batch_size * 4)
+            train_X = train_X[ix, :]
+            train_y = train_y[ix]
+        val_ix = train_X.shape[0] * 8 // 10
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        torch.set_num_threads(cpu_count())
-        device = torch.device("cpu")
+        train_dataset = SparseDataset(train_X[:val_ix, :], train_y[:val_ix], field_dims)
+        val_dataset = SparseDataset(train_X[val_ix:, :], train_y[val_ix:], field_dims)
+        train_data_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
+        val_data_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=0)
 
-    model = pycrank.utils.default_model(MODELNAME, field_dims).to(device)
-    config["epochs"] = epochs
-    pycrank.opt.train(
-        model, train_data_loader, val_data_loader, device, config, lambda d: tune.report(**d))
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            torch.set_num_threads(cpu_count())
+            device = torch.device("cpu")
+
+        model = pycrank.utils.default_model(MODELNAME, field_dims).to(device)
+        config["epochs"] = epochs
+        pycrank.opt.train(
+            model, train_data_loader, val_data_loader, device, config, lambda d: tune.report(**d), f'{DATASET} {ENCODING} {TRUNCATE} hpo')
 
 
 pycrank.utils.seed_all(1234)
 params = {
-    "train_X": train_X,
-    "train_y": train_y,
-    "field_dims": field_dims,
-    "epochs": 20,
+    "epochs": 10,
     "batch_size": 2048,
 }
 search_space = {
@@ -110,7 +148,7 @@ for resume in [True, False]:
         analysis = tune.run(
             tune.with_parameters(train_wrapper, **params),
             config=search_space,
-            num_samples=(4 if LOCAL else 20),
+            num_samples=(4 if LOCAL else 8),
             name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
             resources_per_trial=resources,
             metric="val_loss",
@@ -156,82 +194,82 @@ fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1))
 plt.savefig(pdf_out,  bbox_inches='tight')
 
 @ray.remote(num_cpus=resources['cpu'], num_gpus=resources['gpu'])
-def retrain_and_test(datasets, field_dims):
-    pycrank.utils.seed_all(1234)
-    (train_X, train_y, test_X, test_y) = datasets
-    if LOCAL:
-        ix = np.random.choice(train_X.shape[0], BATCH_SIZE * 4)
-        train_X = train_X[ix, :]
-        train_y = train_y[ix]
-        ix = np.random.choice(test_X.shape[0], BATCH_SIZE * 2)
-        test_X = test_X[ix, :]
-        test_y = test_y[ix]
+def retrain_and_test():
+    with mktmp() as tmpdir:
+        (train_X, train_y, test_X, test_y, field_dims, ncol) = mkdata(tmpdir)
 
-    train_dataset = SparseDataset(train_X, train_y, field_dims)
-    test_dataset = SparseDataset(test_X, test_y, field_dims)
+        pycrank.utils.seed_all(1234)
+        if LOCAL:
+            ix = np.random.choice(train_X.shape[0], BATCH_SIZE * 4)
+            train_X = train_X[ix, :]
+            train_y = train_y[ix]
+            ix = np.random.choice(test_X.shape[0], BATCH_SIZE * 2)
+            test_X = test_X[ix, :]
+            test_y = test_y[ix]
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        torch.set_num_threads(cpu_count())
-        device = torch.device("cpu")
+        train_dataset = SparseDataset(train_X, train_y, field_dims)
+        test_dataset = SparseDataset(test_X, test_y, field_dims)
 
-    emit = {}
-    emit["num_train"] = len(train_dataset)
-    emit["num_test"] = len(test_dataset)
-    emit["modelname"] = MODELNAME
-    emit["dataset"] = DATASET
-    emit["encoding"] = ENCODING
-    emit["device"] = str(device.type)
-    emit["truncate"] = NCOL # == TRUNCATE unless 0, in which case == ncolors
-    print(emit)
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            torch.set_num_threads(cpu_count())
+            device = torch.device("cpu")
 
-    train_data_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
-    test_data_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=0)
-    model = pycrank.utils.default_model(MODELNAME, field_dims).to(device)
+        emit = {}
+        emit["num_train"] = len(train_dataset)
+        emit["num_test"] = len(test_dataset)
+        emit["modelname"] = MODELNAME
+        emit["dataset"] = DATASET
+        emit["encoding"] = ENCODING
+        emit["device"] = str(device.type)
+        emit["truncate"] = ncol # == TRUNCATE unless 0, in which case == ncolors
+        print(emit)
 
-    BEST_CONFIG["epochs"] = EPOCHS
-    train_time = 0
-    train_mem = {}
-    train_epoch_losses = []
-    test_epoch_losses = [] # only for debug, note val used above for hpo
-    def callback(d):
-        nonlocal train_time, train_mem, train_epoch_losses, test_epoch_losses
-        train_time += d["train_time"]
-        for k in pycrank.utils.PEAK_MEM_KEYS:
-            train_mem[k] = max(train_mem.get(k) or 0, d.get(k) or 0)
-        print('epoch:', 1 + d["epoch_i"], 'of', EPOCHS,
-              'train: logloss: {:7.4f}'.format(d["train_loss"]),
-              'val  : logloss: {:7.4f}'.format(d["val_loss"]))
+        train_data_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, num_workers=0)
+        test_data_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=0)
+        model = pycrank.utils.default_model(MODELNAME, field_dims).to(device)
+
+        BEST_CONFIG["epochs"] = EPOCHS
+        train_time = 0
+        train_mem = {}
+        train_epoch_losses = []
+        test_epoch_losses = [] # only for debug, note val used above for hpo
+        def callback(d):
+            nonlocal train_time, train_mem, train_epoch_losses, test_epoch_losses
+            train_time += d["train_time"]
+            for k in pycrank.utils.PEAK_MEM_KEYS:
+                train_mem[k] = max(train_mem.get(k) or 0, d.get(k) or 0)
+            print('epoch:', 1 + d["epoch_i"], 'of', EPOCHS,
+                  'train: logloss: {:7.4f}'.format(d["train_loss"]),
+                  'val  : logloss: {:7.4f}'.format(d["val_loss"]))
+            sys.stdout.flush()
+            train_epoch_losses.append(d["train_loss"])
+            test_epoch_losses.append(d["val_loss"])
+        pycrank.opt.train(model, train_data_loader, test_data_loader, device, BEST_CONFIG, callback, f'final {DATASET} {ENCODING} {TRUNCATE}')
+
+        emit["config"] = BEST_CONFIG
+        emit["train_epoch_logloss"] = train_epoch_losses
+        emit["test_epoch_logloss"] = test_epoch_losses
+
+        emit["train_acc"], emit["train_logloss"], emit["train_auc"], emit["train_acc_best_const"] = pycrank.opt.test(model, train_data_loader, device)
+        print('train:', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
+              .format(emit["train_logloss"], emit["train_acc"], emit["train_auc"], emit["train_acc_best_const"]))
         sys.stdout.flush()
-        train_epoch_losses.append(d["train_loss"])
-        test_epoch_losses.append(d["val_loss"])
-    pycrank.opt.train(model, train_data_loader, test_data_loader, device, BEST_CONFIG, callback)
 
-    emit["config"] = BEST_CONFIG
-    emit["train_epoch_logloss"] = train_epoch_losses
-    emit["test_epoch_logloss"] = test_epoch_losses
+        emit["test_acc"], emit["test_logloss"], emit["test_auc"], emit["test_acc_best_const"] = pycrank.opt.test(model, test_data_loader, device)
+        print('test :', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
+              .format(emit["test_logloss"], emit["test_acc"], emit["test_auc"], emit["test_acc_best_const"]))
+        sys.stdout.flush()
 
-    emit["train_acc"], emit["train_logloss"], emit["train_auc"], emit["train_acc_best_const"] = pycrank.opt.test(model, train_data_loader, device)
-    print('train:', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
-          .format(emit["train_logloss"], emit["train_acc"], emit["train_auc"], emit["train_acc_best_const"]))
-    sys.stdout.flush()
+        emit["train_sec"] = train_time
+        emit['num_params'] = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        for k in pycrank.utils.PEAK_MEM_KEYS:
+            emit[k] = train_mem.get(k)
 
-    emit["test_acc"], emit["test_logloss"], emit["test_auc"], emit["test_acc_best_const"] = pycrank.opt.test(model, test_data_loader, device)
-    print('test :', 'log: {:7.4f} acc: {:7.4f} auc: {:7.4f} acc best const: {:7.4f}'
-          .format(emit["test_logloss"], emit["test_acc"], emit["test_auc"], emit["test_acc_best_const"]))
-    sys.stdout.flush()
+        return emit
 
-    emit["train_sec"] = train_time
-    emit['num_params'] = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    for k in pycrank.utils.PEAK_MEM_KEYS:
-        emit[k] = train_mem.get(k)
-
-    return emit
-
-datasets = (train_X, train_y, test_X, test_y)
-
-emit = ray.get(retrain_and_test.remote(datasets, field_dims))
+emit = ray.get(retrain_and_test.remote())
 
 import json
 
