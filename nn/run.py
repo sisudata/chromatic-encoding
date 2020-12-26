@@ -92,7 +92,7 @@ params = {
     "train_y": train_y,
     "field_dims": field_dims,
     "epochs": 20,
-    "batch_size": 256,
+    "batch_size": 2048,
 }
 search_space = {
     "sparse_lr": tune.loguniform(1e-5, 1e-2),
