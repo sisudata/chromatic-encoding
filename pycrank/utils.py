@@ -46,7 +46,9 @@ def load_binary_csr(data, indices, indptr, y):
     dtypes = [np.uint32, np.uint32, np.uint64, np.uint32]
     data, indices, indptr, y = (
         np.fromfile(f, dtype=d) for f, d in zip(files, dtypes))
-    return sps.csr_matrix((data, indices, indptr)), y
+    nrows = np.int64(len(indptr) - 1)
+    ncols = np.int64(int(indices.max()) + 1)
+    return sps.csr_matrix((data, indices, indptr), shape=(nrows, ncols)), y
 
 def seed_all(seed):
     torch.manual_seed(seed)

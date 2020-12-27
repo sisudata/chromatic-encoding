@@ -133,7 +133,6 @@ params = {
     "batch_size": 2048,
 }
 search_space = {
-    "sparse_lr": tune.loguniform(1e-5, 1e-2),
     "lr": tune.loguniform(1e-5, 1e-2),
     "wd": tune.loguniform(1e-5, 1e-2),
 } # keys expected by pycrank.opt.train
@@ -182,7 +181,7 @@ configs = analysis.get_all_configs()
 for trial_key, trial_df in dfs.items():
     if len(trial_df) == 0:
         continue
-    label = ' '.join('{}={}'.format(k, configs[trial_key]) for k in search_space)
+    label = ' '.join('{}={}'.format(k, configs[trial_key][k]) for k in search_space)
     trial_df.train_loss.plot(ax=axs[0], label='train {}'.format(label))
     trial_df.val_loss.plot(ax=axs[1], label='val {}'.format(label))
 axs[0].set_title("hpo train loss")
@@ -190,6 +189,7 @@ axs[1].set_title("hpo val loss")
 for ax in axs.flat:
     ax.set(xlabel='epoch', ylabel='log loss')
     ax.label_outer()
+    ax.set(yscale="log")
 fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1))
 plt.savefig(pdf_out,  bbox_inches='tight')
 

@@ -1,6 +1,6 @@
 cluster_name: ce-cluster
 min_workers: 0
-max_workers: 8
+max_workers: 30
 initial_workers: 8
 upscaling_speed: 2.0
 docker:
@@ -53,7 +53,6 @@ file_mounts: {
 initialization_commands: []
 setup_commands:
     - pip install numpy jupyter scikit-learn scipy tqdm torch ray[tune] awscli
-    - pip install --force-reinstall git+https://github.com/sisudata/chromatic-encoding@simple
     - while sudo fuser /var/{lib/{dpkg,apt/lists},cache/apt/archives}/lock >/dev/null 2>&1; do sleep 1; done && sudo apt install -y vowpal-wabbit datamash zstd moreutils gawk
 head_setup_commands: []
 worker_setup_commands: []

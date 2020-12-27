@@ -32,13 +32,12 @@ def train(model, train_data_loader, val_data_loader, device, config, callback, t
      * epochs - number of epochs
      * lr - learning rate
      * wd - weight decay
-     * sparse_lr - learning rate for sparse grads (used for embeddings)
     """
     criterion = torch.nn.BCEWithLogitsLoss()
-    dense_optimizer = torch.optim.AdamW(
+    dense_optimizer = torch.optim.SGD(
         [p for _, p in model.dense_parameters()], lr=config["lr"], weight_decay=config["wd"])
-    sparse_optimizer = torch.optim.SparseAdam(
-        params=[p for _, p in model.sparse_parameters()], lr=config["sparse_lr"])
+    sparse_optimizer = torch.optim.SGD(
+        params=[p for _, p in model.sparse_parameters()], lr=config["lr"])
 
     for epoch_i in range(config["epochs"]):
         epoch_name = 'epoch {:2d} of {}'.format(epoch_i + 1, config["epochs"])

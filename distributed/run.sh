@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-if ! git diff-index --quiet HEAD -- encode/ nn/ ; then
+if ! git diff-index --quiet HEAD -- encode/ nn/ pycrank/ setup.py requirements.txt ; then
     echo 'current branch has changes in encode/ or nn/'
     exit 1
 fi 
@@ -11,7 +11,7 @@ sha=$(git rev-parse HEAD)
 
 ray exec distributed/ce-cluster.yaml "mkdir -p ~/$sha/{nn,encode}/data" 1>/dev/null 2>/dev/null
 
-for i in $(git ls-files common.sh encode/ nn/) ; do
+for i in $(git ls-files common.sh encode/ nn/ pycrank/ setup.py requirements.txt) ; do
     ray rsync_up distributed/ce-cluster.yaml "$i" "~/$sha/$i" 1>/dev/null 2>/dev/null 
 done
 
@@ -28,4 +28,5 @@ function remote_exec() {
 }
 
 remote_exec 'S3ROOT="'"$S3ROOT"'" DATASETS="'"$DATASETS"'" ENCODINGS="'"$ENCODINGS"'" TRUNCATES="'"$TRUNCATES"'" bash encode/run.sh'
+remote_exec 'pip install --force-reinstall .'
 remote_exec 'RAY_ADDRESS="auto" S3ROOT="'"$S3ROOT"'" DATASETS="'"$DATASETS"'" ENCODINGS="'"$ENCODINGS"'" TRUNCATES="'"$TRUNCATES"'" MODELNAMES="wd" bash nn/run.sh --force' "$@"
