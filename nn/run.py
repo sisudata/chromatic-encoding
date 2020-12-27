@@ -129,7 +129,7 @@ def train_wrapper(config, epochs=None, batch_size=None):
 
 pycrank.utils.seed_all(1234)
 params = {
-    "epochs": 20,
+    "epochs": 10,
     "batch_size": 2048,
 }
 search_space = {
@@ -141,64 +141,57 @@ resources = {
     'gpu': 0 if LOCAL else 1,
 }
 
-if False:
-    # try to resume first
-    for resume in [True, False]:
-
-        try:
-            analysis = tune.run(
-                tune.with_parameters(train_wrapper, **params),
-                config=search_space,
-                num_samples=8,
-                name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
-                resources_per_trial=resources,
-                metric="val_loss",
-                queue_trials=True,
-                scheduler=tune.schedulers.ASHAScheduler(
-                    max_t=params["epochs"],
-                    grace_period=5),
-                resume=resume,
-                local_dir="nn/data/ray_experiments",
-                max_failures=2,
-                mode="min")
-            break
-        except ValueError as exc:
-            if 'Called resume when no checkpoint exists in local directory.' in str(exc):
-                continue
-            else:
-                raise
-
-
-
-    BEST_CONFIG = dict(analysis.best_config)
-    print('best config', BEST_CONFIG)
-    BATCH_SIZE = params["batch_size"]
-    EPOCHS = params["epochs"]
-
-    from matplotlib import pyplot as plt
-
-    fig, axs = plt.subplots(2)
-    dfs = analysis.trial_dataframes
-    configs = analysis.get_all_configs()
-    for trial_key, trial_df in dfs.items():
-        if len(trial_df) == 0:
+# try to resume first
+for resume in [True, False]:
+    try:
+        analysis = tune.run(
+            tune.with_parameters(train_wrapper, **params),
+            config=search_space,
+            num_samples=12,
+            name=f"{MODELNAME}-{DATASET}-{ENCODING}-{TRUNCATE}",
+            resources_per_trial=resources,
+            metric="val_loss",
+            queue_trials=True,
+            scheduler=tune.schedulers.ASHAScheduler(
+                max_t=params["epochs"],
+                grace_period=max(params["epochs"] // 5, 1)),
+            resume=resume,
+            local_dir="nn/data/ray_experiments",
+            max_failures=2,
+            mode="min")
+        break
+    except ValueError as exc:
+        if 'Called resume when no checkpoint exists in local directory.' in str(exc):
             continue
-        label = ' '.join('{}={}'.format(k, configs[trial_key][k]) for k in search_space)
-        trial_df.train_loss.plot(ax=axs[0], label='train {}'.format(label))
-        trial_df.val_loss.plot(ax=axs[1], label='val {}'.format(label))
-    axs[0].set_title("hpo train loss")
-    axs[1].set_title("hpo val loss")
-    for ax in axs.flat:
-        ax.set(xlabel='epoch', ylabel='log loss')
-        ax.label_outer()
-        ax.set(yscale="log")
-    fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1))
-    plt.savefig(pdf_out,  bbox_inches='tight')
+        else:
+            raise
 
-BEST_CONFIG = {"lr": 0.001, "wd": 0.0001}
-BATCH_SIZE = 2048 # params["batch_size"]
-EPOCHS = 20 # params["epochs"]
 
+
+BEST_CONFIG = dict(analysis.best_config)
+print('best config', BEST_CONFIG)
+BATCH_SIZE = params["batch_size"]
+EPOCHS = params["epochs"]
+
+from matplotlib import pyplot as plt
+
+fig, axs = plt.subplots(2)
+dfs = analysis.trial_dataframes
+configs = analysis.get_all_configs()
+for trial_key, trial_df in dfs.items():
+    if len(trial_df) == 0:
+        continue
+    label = ' '.join('{}={}'.format(k, configs[trial_key][k]) for k in search_space)
+    trial_df.train_loss.plot(ax=axs[0], label='train {}'.format(label))
+    trial_df.val_loss.plot(ax=axs[1], label='val {}'.format(label))
+axs[0].set_title("hpo train loss")
+axs[1].set_title("hpo val loss")
+for ax in axs.flat:
+    ax.set(xlabel='epoch', ylabel='log loss')
+    ax.label_outer()
+    ax.set(yscale="log")
+fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1))
+plt.savefig(pdf_out,  bbox_inches='tight')
 
 @ray.remote(num_cpus=resources['cpu'], num_gpus=resources['gpu'])
 def retrain_and_test():
