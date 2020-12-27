@@ -5,7 +5,7 @@
 # For given ${encoding}_${truncate}_${dataset}.tar, extracts the dataset, trains a neural net,
 # and saves logs and result metrics to ${dataset}.${encoding}.${truncate}.${modelname}.tar
 #
-# which contains a .log logfile, .json result file, .pdf HPO viz all of the same basename.
+# which contains a .log logfile, .json result file all of the same basename.
 
 set -euo pipefail
 
@@ -51,11 +51,10 @@ for dataset_encoding_truncate_modelname in $to_get ; do
             nn/run.py \
             "$s3src" \
            nn/data/${dataset_encoding_truncate_modelname}.json \
-           nn/data/${dataset_encoding_truncate_modelname}.pdf \
         | tee nn/data/${dataset_encoding_truncate_modelname}.log
     
     tar cf nn/data/${dataset_encoding_truncate_modelname}.tar -C nn/data \
-        --remove-files ${dataset_encoding_truncate_modelname}.{log,json,pdf}
+        --remove-files ${dataset_encoding_truncate_modelname}.{log,json}
     
     cache_write ${dataset_encoding_truncate_modelname}.tar
 done

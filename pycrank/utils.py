@@ -48,6 +48,8 @@ def load_binary_csr(data, indices, indptr, y):
         np.fromfile(f, dtype=d) for f, d in zip(files, dtypes))
     nrows = np.int64(len(indptr) - 1)
     ncols = np.int64(int(indices.max()) + 1)
+    if nrows < 0 or ncols < 0:
+        raise ValueError('bad shape {}'.format((nrows, ncols)))
     return sps.csr_matrix((data, indices, indptr), shape=(nrows, ncols)), y
 
 def seed_all(seed):

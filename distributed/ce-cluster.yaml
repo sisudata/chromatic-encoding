@@ -31,7 +31,7 @@ worker_nodes:
     BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-              VolumeSize: 128
+              VolumeSize: 512
     SubnetId: subnet-08e8308b46b4e9772
     InstanceMarketOptions:
         MarketType: spot
