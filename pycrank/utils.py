@@ -32,7 +32,7 @@ def default_model(name, field_dims):
     Generates a pytorch model based on default parameters.
     """
     if name == 'wd':
-        return WideAndDeepModel(field_dims, embed_dim=16, mlp_dims=(16, 16), dropout=0.2)
+        return WideAndDeepModel(field_dims, embed_dim=256, mlp_dims=(256, 256), dropout=0.5)
 
     raise ValueError('unknown model name: ' + name)
 
