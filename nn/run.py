@@ -112,7 +112,7 @@ params = {
     "epochs": 10,
     "batch_size": 2048,
     "lr": 1e-3,
-    "wd": 1e-4
+    "wd": 0,
 }
 resources = {
     'cpu': cpu_count() if LOCAL else 0,
