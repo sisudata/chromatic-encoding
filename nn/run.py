@@ -107,6 +107,16 @@ def mktmp():
     home = str(Path.home())
     return tempfile.TemporaryDirectory(dir=home, prefix='ray-job-')
 
+def mkmodel(field_dims):
+    if MODELNAME == 'wd':
+        from pycrank.wd import WideAndDeepModel
+        return WideAndDeepModel(
+            field_dims,
+            embed_dim=32,
+            mlp_dims=(128, 128),
+            dropout=0.5)
+    raise ValueError('unknown model name: ' + MODELNAME)
+
 pycrank.utils.seed_all(1234)
 params = {
     "epochs": 10,
@@ -157,7 +167,7 @@ def retrain_and_test():
 
         train_data_loader = DataLoader(train_dataset, batch_size=params["batch_size"], num_workers=0)
         test_data_loader = DataLoader(test_dataset, batch_size=params["batch_size"], num_workers=0)
-        model = pycrank.utils.default_model(MODELNAME, field_dims).to(device)
+        model = mkmodel(field_dims).to(device)
 
         train_time = 0
         train_mem = {}

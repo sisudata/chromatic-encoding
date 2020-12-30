@@ -12,8 +12,6 @@ import torch
 import numpy as np
 from scipy import sparse as sps
 
-from .wd import WideAndDeepModel
-
 @contextmanager
 def timeit(name, preprint=True):
     """Enclose a with-block with to debug-print out block runtime"""
@@ -26,15 +24,6 @@ def timeit(name, preprint=True):
     if not preprint:
         print(name, end='')
     print(' took {:0.1f} seconds'.format(t))
-
-def default_model(name, field_dims):
-    """
-    Generates a pytorch model based on default parameters.
-    """
-    if name == 'wd':
-        return WideAndDeepModel(field_dims, embed_dim=256, mlp_dims=(256, 256), dropout=0.5)
-
-    raise ValueError('unknown model name: ' + name)
 
 def load_binary_csr(data, indices, indptr, y):
     """
