@@ -34,9 +34,9 @@ def train(model, train_data_loader, val_data_loader, device, config, callback, t
      * wd - weight decay
     """
     criterion = torch.nn.BCEWithLogitsLoss()
-    dense_optimizer = torch.optim.SGD(
+    dense_optimizer = torch.optim.AdamW(
         [p for _, p in model.dense_parameters()], lr=config["lr"], weight_decay=config["wd"])
-    sparse_optimizer = torch.optim.SGD(
+    sparse_optimizer = torch.optim.SparseAdam(
         params=[p for _, p in model.sparse_parameters()], lr=config["lr"])
 
     for epoch_i in range(config["epochs"]):
