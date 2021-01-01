@@ -17,11 +17,14 @@
 #
 # The different ENCODINGS supported are
 #
-# ft - frequency truncate, just filters to the most popular TRUNCATE
+# ft - frequency truncate, just filters to the most popular TRUNCATES
 # features (default 1000000).
 #
-# ce - greedy coloring approach to chromatic encoding.
-# TODO: consider ce1, ce10, ce100 corresponding to different k values.
+# ce - greedy coloring approach to chromatic encoding, using TRUNCATES colors.
+# TODO: consider ce10, ce100 corresponding to different k values.
+#
+# ht - hashing trick into TRUNCATES buckets (actually ideal random bucketing,
+# not hashing)
 #
 # The different TRUNCATES should be integers denoting the number of features
 # (possibly high-cardinality) that featurization should truncate to. Note that
@@ -101,6 +104,50 @@ for dataset_encoding_truncate in $to_get ; do
             rm $train $test
             
             ;;
+        ht)
+            train=$(echo "$all" | grep train)
+            test=$(echo "$all" | grep test)
+
+            # label values will be smaller than feature values anyway
+            # so we just max over those in the script below
+            maxval=$(find encode/data -maxdepth 1 -type f -regextype posix-extended -regex \
+                 "encode/data/${dataset}."'(train|test)\.svm\.[0-9]+' -print0 \
+                | parallel --will-cite -0 awk -f encode/max.awk \
+                | awk -f encode/max.awk)
+
+            
+            pushd encode/data >/dev/null
+            shuf -i0-${maxval} --random-source=<(seeded_random 42) \
+                | awk -v TRUNCATE="${truncate}" -f ../mkhash.awk > ${dataset_encoding_truncate}.shuffle
+            
+            all=$(find . -maxdepth 1 -type f -regextype posix-extended -regex \
+                 "./${dataset}."'(train|test)\.svm\.[0-9]+' -print0 \
+                 | parallel --will-cite -0 '
+                 base=$(basename "{}")
+                 file="'"${encoding}_${truncate}"'_${base}"
+                 orig="${file/.svm/.original.svm}"
+                 cat '"${dataset_encoding_truncate}"'.shuffle $base | awk -v TRUNCATE='"${truncate}"' -v MAXVAL='"${maxval}"' -f ../ht.awk > $file
+                 zstd --rm -f -q $base -o ${orig}.zst
+                 zstd -f -q $file -o ${file}.zst
+                 basename ${orig}.zst
+                 basename ${file}.zst
+                 mv $file $base
+            ')
+            rm ${dataset_encoding_truncate}.shuffle
+            touch ${dataset_encoding_truncate}.jsonl
+            all=$(echo "$all" && echo ${dataset_encoding_truncate}.jsonl)
+            popd >/dev/null
+            # at this point the files referred to by $train and $test are frequency-truncated
+
+            cargo build -p crank --release --example svm2bins > /dev/null 2>&1
+            target/release/examples/svm2bins \
+                 --train $train --test $test \
+                 --train-out encode/data/${dataset_encoding_truncate}.train \
+                 --test-out encode/data/${dataset_encoding_truncate}.test
+
+            rm $train $test
+            
+            ;;
         ce)
             train=$(echo "$all" | grep train)
             test=$(echo "$all" | grep test)
@@ -155,4 +202,3 @@ for dataset_encoding_truncate in $to_get ; do
     
     cache_write ${encoding}_${truncate}_${dataset}.tar    
 done
-

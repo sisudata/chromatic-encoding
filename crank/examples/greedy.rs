@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use std::u32;
 
-use rayon::iter::{ParallelIterator};
+use rayon::iter::ParallelIterator;
 use serde_json::json;
 use structopt::StructOpt;
 
