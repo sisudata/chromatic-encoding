@@ -1,7 +1,7 @@
 cluster_name: ce-cluster
 min_workers: 0
 max_workers: 30
-initial_workers: 8
+initial_workers: 0
 upscaling_speed: 2.0
 docker:
     head_image: "rayproject/ray-ml:latest-cpu"

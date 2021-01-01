@@ -119,9 +119,9 @@ def mkmodel(field_dims):
 
 pycrank.utils.seed_all(1234)
 params = {
-    "epochs": 10,
+    "epochs": 30,
     "batch_size": 2048,
-    "lr": 1e-3,
+    "lr": 1e-2,
     "wd": 1e-4,
 }
 resources = {
