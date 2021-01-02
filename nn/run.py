@@ -94,6 +94,87 @@ def mkdata(datadir):
         tXm = test_X.max(axis=0).toarray()
         field_dims = np.maximum(Xm.ravel(), tXm.ravel())
 
+    with pycrank.utils.timeit('offset uniq-ing'):
+        # for column c, offsets[c] is the total number of features from
+        # all earlier columns. So offsets[c] + 1-indexed data of column c
+        # is a unique feature value in [1, total num features] and the c-th
+        # column occupies range [1 + offsets[c], field_dims[c] + offsets[c]]
+        # zeros must never appear in the underlying CSR arrays so they are not
+        # represented except as sentinels for the entire array, e.g., the first
+        # 0.
+        offsets = np.insert(np.cumsum(field_dims, dtype=np.uint32), 0, 0)
+        # uniqued contains the original data in the specified ranges
+        uniqued = offsets[train_X.indices] + train_X.data
+        uniqued_test = offsets[test_X.indices] + test_X.data
+
+    with pycrank.utils.timeit('bincount'):
+        counts = np.bincount(uniqued)
+        assert counts[0] == 0, counts[0] # everything was 1-indexed
+
+    with pycrank.utils.timeit('binsort'):
+        tops = np.argsort(counts)[::-1]
+
+    ncut = 1024 * 1024
+    winners = tops[:ncut]
+    cut = counts[winners[-1]]
+    print('freq cutoff', ncut, 'at count',
+          cut, 'of', train_X.shape[0], 'for count >= 10 keep', np.sum(counts >= 10), file=sys.stderr)
+
+    with pycrank.utils.timeit('mask compute'):
+        keep = np.zeros(len(counts), dtype=bool)
+        keep[winners] = True
+        excl0 = keep[0]
+        keep[0] = False # in case len(tops) < ncut, 0 feature might be included
+        keep_uniqued = keep[uniqued]
+        keep_uniqued_test = keep[uniqued_test]
+
+    with pycrank.utils.timeit('remap'):
+        # find new offsets such that the retained features can be remapped to
+        # compact intervals.
+        # uniqued feature f -> monotone_features[f]
+        # is the new 1-indexed feature value (or the most recent on of lower index).
+        monotone_features = np.cumsum(keep, dtype=np.uint32)
+        assert monotone_features[0] == 0
+        assert monotone_features[-1] == len(winners) - excl0
+        # recall the offset <-> uniqued relationship
+        winner_features_per_column = np.diff(monotone_features[offsets]) #[offsets[1:]] - monotone_features[offsets[:-1] + 1] - keep[offsets[:-1] + 1]
+        base_col = np.cumsum(winner_features_per_column)
+        base_col = np.roll(base_col, 1)
+        assert base_col[0] == len(winners) - excl0, (base_col[0], len(winners) - excl0)
+        base_col[0] = 0
+        base_feature = np.repeat(base_col, np.diff(offsets))
+        # note counts has a dummy 0 feature
+        assert offsets[-1] + 1 == len(counts)
+        assert len(base_feature) + 1 == len(counts)
+        monotone_features[1:] -= base_feature # still 1-indexed
+        remap = monotone_features
+
+    with pycrank.utils.timeit('new indptr'):
+        new_indptr = np.insert(np.cumsum(keep_uniqued, dtype=np.uint64), 0, 0)
+        new_indptr = new_indptr[train_X.indptr]
+        new_indptr_test = np.insert(np.cumsum(keep_uniqued_test, dtype=np.uint64), 0, 0)
+        new_indptr_test = new_indptr_test[test_X.indptr]
+
+    with pycrank.utils.timeit('new mats'):
+        new_indices = train_X.indices[keep_uniqued]
+        new_data = remap[uniqued[keep_uniqued]]
+        new_indices_test = test_X.indices[keep_uniqued_test]
+        new_data_test = remap[uniqued_test[keep_uniqued_test]]
+
+    train_X = sps.csr_matrix((new_data, new_indices, new_indptr), shape=train_X.shape)
+    test_X = sps.csr_matrix((new_data_test, new_indices_test, new_indptr_test), shape=test_X.shape)
+
+    with pycrank.utils.timeit('computing trunc field dims'):
+        Xm = train_X.max(axis=0).toarray()
+        tXm = test_X.max(axis=0).toarray()
+        field_dims = np.maximum(Xm.ravel(), tXm.ravel())
+        assert np.all(field_dims == winner_features_per_column), (
+            np.sum(field_dims != winner_features_per_column),
+            field_dims[field_dims != winner_features_per_column][:10],
+            winner_features_per_column[field_dims != winner_features_per_column][:10],
+            np.flatnonzero(field_dims != winner_features_per_column)[:10])
+
+
     datasets = (train_X, train_y, test_X, test_y, field_dims, ncol)
     return datasets
 
@@ -119,7 +200,7 @@ def mkmodel(field_dims):
 
 pycrank.utils.seed_all(1234)
 params = {
-    "epochs": 30,
+    "epochs": 10,
     "batch_size": 2048,
     "lr": 1e-2,
     "wd": 1e-4,

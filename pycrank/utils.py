@@ -17,13 +17,12 @@ def timeit(name, preprint=True):
     """Enclose a with-block with to debug-print out block runtime"""
     t = time()
     if preprint:
-        print(name, end='')
-        sys.stdout.flush()
+        print(name, end='', file=sys.stderr)
     yield
     t = time() - t
     if not preprint:
-        print(name, end='')
-    print(' took {:0.1f} seconds'.format(t))
+        print(name, end='', file=sys.stderr)
+    print(' took {:0.1f} seconds'.format(t), file=sys.stderr)
 
 def load_binary_csr(data, indices, indptr, y):
     """
