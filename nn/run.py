@@ -114,11 +114,11 @@ def mkdata(datadir):
     with pycrank.utils.timeit('binsort'):
         tops = np.argsort(counts)[::-1]
 
-    ncut = 1024 * 1024
+    ncut = np.sum(counts >= 5)
     winners = tops[:ncut]
     cut = counts[winners[-1]]
     print('freq cutoff', ncut, 'at count',
-          cut, 'of', train_X.shape[0], 'for count >= 10 keep', np.sum(counts >= 10), file=sys.stderr)
+          cut, 'of', train_X.shape[0], file=sys.stderr)
 
     with pycrank.utils.timeit('mask compute'):
         keep = np.zeros(len(counts), dtype=bool)
