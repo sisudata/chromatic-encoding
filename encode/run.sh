@@ -20,8 +20,8 @@
 # ft - frequency truncate, just filters to the most popular TRUNCATES
 # features (default 1000000).
 #
-# ce - greedy coloring approach to chromatic encoding, using TRUNCATES colors.
-# TODO: consider ce10, ce100 corresponding to different k values.
+# ce<k> - greedy coloring approach to chromatic encoding, using TRUNCATES colors.
+# Truncates edges of size k for k in 1, 10, 100.
 #
 # ht - hashing trick into TRUNCATES buckets (actually ideal random bucketing,
 # not hashing)
@@ -148,10 +148,10 @@ for dataset_encoding_truncate in $to_get ; do
             rm $train $test
             
             ;;
-        ce)
+        ce1|ce10|ce100)
+            k=${encoding:2}
             train=$(echo "$all" | grep train)
             test=$(echo "$all" | grep test)
-            k=1
 
             tar xf graph/data/${dataset}.graph.tar -C encode/data/
             graphs=$( find encode/data -maxdepth 1 -type f -regextype posix-extended -regex \
