@@ -114,7 +114,7 @@ def mkdata(datadir):
     with pycrank.utils.timeit('binsort'):
         tops = np.argsort(counts)[::-1]
 
-    ncut = np.sum(counts >= 5)
+    ncut = np.sum(counts >= 2)
     winners = tops[:ncut]
     cut = counts[winners[-1]]
     print('freq cutoff', ncut, 'at count',
