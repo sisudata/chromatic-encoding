@@ -13,6 +13,7 @@ import torch
 import numpy as np
 
 from .utils import PEAK_MEM_KEYS
+from .sparse_adam import SparseAdamAMS
 
 def train(model, train_data_loader, val_data_loader, device, config, callback, tqdm=None):
     """
@@ -35,8 +36,8 @@ def train(model, train_data_loader, val_data_loader, device, config, callback, t
     """
     criterion = torch.nn.BCEWithLogitsLoss()
     dense_optimizer = torch.optim.AdamW(
-        [p for _, p in model.dense_parameters()], lr=config["lr"], weight_decay=config["wd"])
-    sparse_optimizer = torch.optim.SparseAdam(
+        [p for _, p in model.dense_parameters()], lr=config["lr"], weight_decay=config["wd"], amsgrad=True)
+    sparse_optimizer = SparseAdamAMS(
         params=[p for _, p in model.sparse_parameters()], lr=config["lr"])
 
     for epoch_i in range(config["epochs"]):
