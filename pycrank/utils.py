@@ -46,6 +46,8 @@ def seed_all(seed):
     np.random.seed(seed)
     warnings.filterwarnings(
         "ignore", message=r".*CUDA initialization: Found no NVIDIA driver.*")
+    warnings.filterwarnings(
+        "ignore", message=r".*torch.cuda.reset_max_memory_allocated now calls torch.cuda.reset_peak_memory_stats.*")
 
 def rpad(X, col):
     assert X.getformat() == 'csr'
