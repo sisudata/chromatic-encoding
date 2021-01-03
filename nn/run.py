@@ -202,7 +202,7 @@ pycrank.utils.seed_all(1234)
 params = {
     "epochs": 10,
     "batch_size": 2048,
-    "lr": 1e-2,
+    "lr": 1e-3,
     "wd": 1e-4,
 }
 resources = {
